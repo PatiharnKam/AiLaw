@@ -1,0 +1,11 @@
+# testing
+/coverage
+
+/out/
+
+# production
+/build
+
+# env files (can opt-in for committing if needed)
+.env*
+

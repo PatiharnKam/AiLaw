@@ -2,70 +2,130 @@
 package main
 
 import (
-	"log"
+	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/PatiharnKam/AiLaw/app/service"
+	"github.com/PatiharnKam/AiLaw/config"
 	"github.com/gin-gonic/gin"
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
+)
+
+const (
+	gracefulShutdownDuration = 10 * time.Second
+	serverReadHeaderTimeout  = 300 * time.Second
+	serverReadTimeout        = 300 * time.Second
+	serverWriteTimeout       = 300 * time.Second
 )
 
 func main() {
-
-	r := gin.Default()
+	cfg, err := config.InitConfig()
+	if err != nil {
+		slog.Error("unable to parse specific config", " error :", err.Error())
+		return
+	}
+	r := gin.New()
+	r.Use(gin.Recovery())
 
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(200)
 			return
 		}
 
 		c.Next()
 	})
 
-	{
-		r.GET("/health", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{
-				"status":  "OK",
-				"message": "Server is running",
-			})
-		})
+	r.GET("/health", health())
 
-		r.GET("/hello", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Hello World!",
-				"server":  "Gin-Gonic",
-				"port":    "8080",
-			})
-		})
-
-		r.GET("/hello/:name", func(c *gin.Context) {
-			name := c.Param("name")
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Hello " + name + "!",
-				"name":    name,
-			})
-		})
-
-		r.GET("/greet", func(c *gin.Context) {
-			name := c.DefaultQuery("name", "World")
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Hello " + name + "!",
-				"query":   name,
-			})
-		})
+	apiKey := cfg.APIkey.GeminiAPIkey
+	if apiKey == "" {
+		slog.Error("GEMINI_API_KEY environment variable is required")
 	}
 
-	log.Println("🚀 Server starting on http://localhost:8080")
-	log.Println("📍 Endpoints:")
-	log.Println("   GET /health")
-	log.Println("   GET /hello")
-	log.Println("   GET /hello/:name")
-	log.Println("   GET /greet?name=YourName")
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		slog.Error("Failed to create Gemini client ", "error :", err.Error())
+	}
 
-	if err := r.Run(":8080"); err != nil {
-		log.Fatal("Failed to start server:", err)
+	model := client.GenerativeModel("gemini-1.5-flash")
+
+	model.GenerationConfig = genai.GenerationConfig{
+		Temperature:     genai.Ptr(float32(0.7)),
+		TopK:            genai.Ptr(int32(40)),
+		TopP:            genai.Ptr(float32(0.95)),
+		MaxOutputTokens: genai.Ptr(int32(1024)),
+	}
+
+	{
+		getMessageService := service.NewService(cfg, client, model)
+		getMessageHandler := service.NewHandler(getMessageService)
+		r.POST("/message", getMessageHandler.GetMessage)
+	}
+
+	{
+		getMessageService := service.NewService(cfg, client, model)
+		getMessageHandler := service.NewHandler(getMessageService)
+		r.POST("/message/model", getMessageHandler.GetMessageModel)
+	}
+
+	srv := &http.Server{
+		Addr:              ":" + cfg.Server.Port,
+		Handler:           r,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		MaxHeaderBytes:    1 << 20,
+	}
+
+	go gracefully(srv)
+
+	slog.Info("run at : " + cfg.Server.Port)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		slog.Error("HTTP server ListenAndServe: " + err.Error())
+		return
+	}
+}
+
+func gracefully(srv *http.Server) {
+	{
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		<-ctx.Done()
+	}
+
+	d := time.Duration(gracefulShutdownDuration)
+	slog.Info(fmt.Sprintf("shutting down in %d ... \n", d))
+
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Info("HTTP Server Shutdown: " + err.Error())
+	}
+}
+
+func health() func(c *gin.Context) {
+	h, err := os.Hostname()
+	if err != nil {
+		h = fmt.Sprintf("unknown host err: %s", err.Error())
+	}
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"hostname": h,
+			// "version":  strings.ReplaceAll(version, "\n", ""),
+			// "commit":   commit,
+		})
 	}
 }
