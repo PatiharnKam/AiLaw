@@ -11,8 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/PatiharnKam/AiLaw/app/service"
+	"github.com/PatiharnKam/AiLaw/app/auth"
+	service "github.com/PatiharnKam/AiLaw/app/chatbot"
+	messageshistory "github.com/PatiharnKam/AiLaw/app/messages_history"
+	sessionshistory "github.com/PatiharnKam/AiLaw/app/sessions_history"
 	"github.com/PatiharnKam/AiLaw/config"
+	database "github.com/PatiharnKam/AiLaw/db"
+	"github.com/PatiharnKam/AiLaw/middleware"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
@@ -34,18 +40,23 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(200)
-			return
-		}
-
-		c.Next()
+	corsConfig := cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true, // 👈 ต้องใส่ true
 	})
+
+	r.Use(corsConfig)
+
+	db, err := database.NewPostgresDB(cfg.Database.PostgresURL, database.DBConnectionConfig{
+		ConnMaxLifetime:   &cfg.Database.PostgresConnMaxLifetime,
+		ConnMaxIdleTime:   &cfg.Database.PostgresConnMaxIdleTime,
+		MaxOpenConns:      &cfg.Database.PostgresMaxOpenConns,
+		HealthCheckPeriod: &cfg.Database.PostgresHealthCheckPeriod,
+	})
+	defer db.Close()
 
 	r.GET("/health", health())
 
@@ -60,7 +71,7 @@ func main() {
 		slog.Error("Failed to create Gemini client ", "error :", err.Error())
 	}
 
-	model := client.GenerativeModel("gemini-1.5-flash")
+	model := client.GenerativeModel("gemini-2.5-flash")
 
 	model.GenerationConfig = genai.GenerationConfig{
 		Temperature:     genai.Ptr(float32(0.7)),
@@ -69,16 +80,54 @@ func main() {
 		MaxOutputTokens: genai.Ptr(int32(1024)),
 	}
 
+	api := r.Group("/api")
+	api.Use(middleware.GinJWTMiddleware(cfg))
 	{
-		getMessageService := service.NewService(cfg, client, model)
-		getMessageHandler := service.NewHandler(getMessageService)
-		r.POST("/message", getMessageHandler.GetMessage)
+		{
+			getMessageHistoryStorage := messageshistory.NewStorage(db)
+			getMessageHistoryService := messageshistory.NewService(getMessageHistoryStorage)
+			getMessageHistoryHandler := messageshistory.NewHandler(getMessageHistoryService)
+			api.GET("/messages-history/:sessionId", getMessageHistoryHandler.GetMessageHistory)
+		}
+
+		{
+			getSessionHistoryStorage := sessionshistory.NewStorage(db)
+			getSessionHistoryService := sessionshistory.NewService(getSessionHistoryStorage)
+			getSessionHistoryHandler := sessionshistory.NewHandler(getSessionHistoryService)
+			api.GET("/sessions-history", getSessionHistoryHandler.GetSessionHistory)
+		}
+
+		{
+			createChatSessionStorage := service.NewStorage(db)
+			createChatSessionService := service.NewService(cfg, createChatSessionStorage, client, model)
+			createChatSessionHandler := service.NewHandler(createChatSessionService)
+			api.POST("create-session", createChatSessionHandler.CreateChatSessionHandler)
+		}
+
+		{
+			getMessageStorage := service.NewStorage(db)
+			getMessageService := service.NewService(cfg, getMessageStorage, client, model)
+			getMessageHandler := service.NewHandler(getMessageService)
+			api.POST("/message/gemini", getMessageHandler.ChatbotProcessHandler)
+		}
+		{
+			getMessageStorage := service.NewStorage(db)
+			getMessageService := service.NewService(cfg, getMessageStorage, client, model)
+			getMessageHandler := service.NewHandler(getMessageService)
+			api.POST("/message/model", getMessageHandler.ChatbotProcessModelHandler)
+		}
+
 	}
 
 	{
-		getMessageService := service.NewService(cfg, client, model)
-		getMessageHandler := service.NewHandler(getMessageService)
-		r.POST("/message/model", getMessageHandler.GetMessageModel)
+		authStorage := auth.NewStorage(db)
+		authService := auth.NewService(cfg, authStorage)
+		authHandler := auth.NewHandler(authService)
+		r.GET("/token", authHandler.GetToken)
+		r.GET("/auth/google/login", authHandler.GoogleLogin)
+		r.GET("/auth/google/callback", authHandler.GoogleCallback)
+		r.POST("/auth/refresh", authHandler.RefreshTokenProcess)
+		r.POST("/auth/logout", authHandler.Logout)
 	}
 
 	srv := &http.Server{
