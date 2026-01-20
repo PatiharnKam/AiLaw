@@ -100,13 +100,6 @@ func main() {
 		}
 
 		{
-			createChatSessionStorage := service.NewStorage(db)
-			createChatSessionService := service.NewService(cfg, createChatSessionStorage, client, model)
-			createChatSessionHandler := service.NewHandler(createChatSessionService)
-			api.POST("/session", createChatSessionHandler.CreateChatSessionHandler)
-		}
-
-		{
 			deleteChatSessionStorage := deletesession.NewStorage(db)
 			deleteChatSessionService := deletesession.NewService(deleteChatSessionStorage)
 			deleteChatSessionHandler := deletesession.NewHandler(deleteChatSessionService)
@@ -114,14 +107,15 @@ func main() {
 		}
 
 		{
-			getMessageStorage := service.NewStorage(db)
-			getMessageService := service.NewService(cfg, getMessageStorage, client, model)
-			getMessageHandler := service.NewHandler(getMessageService)
-			api.POST("/gemini", getMessageHandler.ChatbotProcessHandler)
+			createChatSessionStorage := service.NewStorage(db)
+			createChatSessionService := service.NewService(cfg, createChatSessionStorage, client)
+			createChatSessionHandler := service.NewHandler(createChatSessionService)
+			api.POST("/session", createChatSessionHandler.CreateChatSessionHandler)
 		}
+
 		{
 			getMessageStorage := service.NewStorage(db)
-			getMessageService := service.NewService(cfg, getMessageStorage, client, model)
+			getMessageService := service.NewService(cfg, getMessageStorage, client)
 			getMessageHandler := service.NewHandler(getMessageService)
 			api.POST("/model", getMessageHandler.ChatbotProcessModelHandler)
 		}

@@ -4,8 +4,6 @@ import "context"
 
 type Service interface {
 	CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (CreateChatSessionResponse, error)
-
-	ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (*GetMessageResponse, error)
 	ChatbotModelProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error)
 }
 

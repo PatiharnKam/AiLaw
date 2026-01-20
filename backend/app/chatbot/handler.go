@@ -63,47 +63,6 @@ func (h *Handler) CreateChatSessionHandler(c *gin.Context) {
 	})
 }
 
-func (h *Handler) ChatbotProcessHandler(c *gin.Context) {
-	logger := slog.Default()
-	var req ChatbotProcessRequest
-
-	req.UserId = c.GetString("userId")
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error("invalid request body : " + err.Error())
-		c.JSON(http.StatusBadRequest, app.Response{
-			Code:    app.InvalidRequestErrorCode,
-			Message: app.InvalidRequestErrorMessage,
-		})
-		return
-	}
-
-	if err := h.validator.Struct(req); err != nil {
-		logger.Error("invalid request body : " + err.Error())
-		c.JSON(http.StatusBadRequest, app.Response{
-			Code:    app.InvalidRequestErrorCode,
-			Message: app.InvalidRequestErrorMessage,
-		})
-		return
-	}
-
-	ctx := c.Request.Context()
-	resp, err := h.service.ChatbotProcess(ctx, req)
-	if err != nil {
-		logger.Error("error from service layer : " + err.Error())
-		c.JSON(http.StatusInternalServerError, app.Response{
-			Code:    app.InternalServerErrorCode,
-			Message: app.InternalServerErrorMessage,
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, app.Response{
-		Code:    app.SUCCESS_CODE,
-		Message: app.SUCCESS_MSG,
-		Data:    resp,
-	})
-}
 func (h *Handler) ChatbotProcessModelHandler(c *gin.Context) {
 	logger := slog.Default()
 	var req ChatbotProcessModelRequest
