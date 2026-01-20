@@ -1,4 +1,4 @@
-package messageshistory
+package feedback
 
 import (
 	"log/slog"
@@ -10,36 +10,43 @@ import (
 )
 
 type Handler struct {
-	service   MessageService
+	service   FeedbackService
 	validator *validator.Validate
 }
 
-func NewHandler(service MessageService) *Handler {
+func NewHandler(service FeedbackService) *Handler {
 	return &Handler{
 		service:   service,
 		validator: validator.New(),
 	}
 }
 
-func (h *Handler) GetMessageHistory(c *gin.Context) {
+func (h *Handler) FeedbackHandler(c *gin.Context) {
 	logger := slog.Default()
-	var req MessageHistoryRequest
-
-	req.SessionId = c.Param("sessionID")
+	var req FeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error("invalid request body : " + err.Error())
+		c.JSON(http.StatusBadRequest, app.Response{
+			Code:    app.InvalidRequestErrorCode,
+			Message: app.InvalidRequestErrorMessage,
+		})
+		return
+	}
+	req.MessageID = c.Param("messageID")
 
 	if err := h.validator.Struct(req); err != nil {
 		logger.Error("invalid request body : " + err.Error())
 		c.JSON(http.StatusBadRequest, app.Response{
 			Code:    app.InvalidRequestErrorCode,
 			Message: app.InvalidRequestErrorMessage,
-		}) 
+		})
 		return
 	}
 
 	ctx := c.Request.Context()
-	resp, err := h.service.GetMessageHistoryService(ctx, req)
+	err := h.service.FeedbackService(ctx, req)
 	if err != nil {
-		logger.Error("error while get message history : " + err.Error())
+		logger.Error("error while update feedback : " + err.Error())
 		c.JSON(http.StatusInternalServerError, app.Response{
 			Code:    app.InternalServerErrorCode,
 			Message: app.InternalServerErrorMessage,
@@ -50,6 +57,5 @@ func (h *Handler) GetMessageHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, app.Response{
 		Code:    app.SUCCESS_CODE,
 		Message: app.SUCCESS_MSG,
-		Data:    resp,
 	})
 }

@@ -80,8 +80,8 @@ func (s *storage) SaveUserMessage(ctx context.Context, sessionId, userMessage st
 func (s *storage) SaveModelMessage(ctx context.Context, sessionId string, modelDetail ModelMessageDetail) error {
 	query := `INSERT INTO chat_messages 
 			(message_id, session_id, role ,content, created_at , feedback,
-			prompt_tokens, completion_tokens, total_tokens, estimate_tokens, response_time)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+			prompt_tokens, completion_tokens, response_time)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 
 	_, err := s.db.Exec(ctx, query,
 		uuid.NewString(),
@@ -92,8 +92,6 @@ func (s *storage) SaveModelMessage(ctx context.Context, sessionId string, modelD
 		modelDetail.Feedback,
 		modelDetail.PromptTokens,
 		modelDetail.CompletionTokens,
-		modelDetail.TotalTokens,
-		modelDetail.EstimateTokens,
 		modelDetail.ResponseTime,
 	)
 	if err != nil {

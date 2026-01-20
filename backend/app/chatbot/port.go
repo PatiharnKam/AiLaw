@@ -36,8 +36,6 @@ type ModelMessageDetail struct {
 	Feedback         *string `json:"feedback"`
 	PromptTokens     *int    `json:"promptTokens"`
 	CompletionTokens *int    `json:"completionTokens"`
-	TotalTokens      *int    `json:"totalTokens"`
-	EstimateTokens   *int    `json:"estimateTokens"`
 	ResponseTime     *int    `json:"responseTime"`
 }
 
@@ -62,21 +60,33 @@ type Messages struct {
 }
 
 type GetMessageModelResponse struct {
-	DelayTime     int    `json:"delayTime"`
-	ExecutionTime int    `json:"executionTime"`
-	Id            string `json:"id"`
-	Output        Output `json:"output"`
-	Status        string `json:"status"`
-	WorkerId      string `json:"workerId"`
-}
-
-type Output struct {
-	Content string `json:"content"`
-	Memory  Memory `json:"memory"`
-	Role    string `json:"role"`
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	Desicion string `json:"desicion"`
+	Memory   Memory `json:"memory"`
 }
 
 type Memory struct {
-	Agent         string `json:"agent"`
-	GuardDecision string `json:"guard_decision"`
+	Agent    string `json:"agent"`
+	Sections string `json:"sections"`
 }
+
+// type GetMessageModelResponse struct {
+// 	DelayTime     int    `json:"delayTime"`
+// 	ExecutionTime int    `json:"executionTime"`
+// 	Id            string `json:"id"`
+// 	Output        Output `json:"output"`
+// 	Status        string `json:"status"`
+// 	WorkerId      string `json:"workerId"`
+// }
+
+// type Output struct {
+// 	Content string `json:"content"`
+// 	Memory  Memory `json:"memory"`
+// 	Role    string `json:"role"`
+// }
+
+// type Memory struct {
+// 	Agent         string `json:"agent"`
+// 	GuardDecision string `json:"guard_decision"`
+// }

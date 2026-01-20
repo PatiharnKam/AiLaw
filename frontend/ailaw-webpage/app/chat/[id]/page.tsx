@@ -221,7 +221,7 @@ export default function ChatPage() {
       //     userMessage: messageContent,
       //   }),
       // })
-      const data = await apiFetch(`/api/message/model`, {
+      const data = await apiFetch(`/api/model`, {
         method: "POST",
         body: JSON.stringify({
           sessionId: chatId,

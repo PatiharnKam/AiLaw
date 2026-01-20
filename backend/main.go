@@ -13,6 +13,8 @@ import (
 
 	"github.com/PatiharnKam/AiLaw/app/auth"
 	service "github.com/PatiharnKam/AiLaw/app/chatbot"
+	deletesession "github.com/PatiharnKam/AiLaw/app/delete_session"
+	feedback "github.com/PatiharnKam/AiLaw/app/feedback"
 	messageshistory "github.com/PatiharnKam/AiLaw/app/messages_history"
 	sessionshistory "github.com/PatiharnKam/AiLaw/app/sessions_history"
 	"github.com/PatiharnKam/AiLaw/config"
@@ -87,7 +89,7 @@ func main() {
 			getMessageHistoryStorage := messageshistory.NewStorage(db)
 			getMessageHistoryService := messageshistory.NewService(getMessageHistoryStorage)
 			getMessageHistoryHandler := messageshistory.NewHandler(getMessageHistoryService)
-			api.GET("/messages-history/:sessionId", getMessageHistoryHandler.GetMessageHistory)
+			api.GET("/messages-history/:sessionID", getMessageHistoryHandler.GetMessageHistory)
 		}
 
 		{
@@ -101,20 +103,34 @@ func main() {
 			createChatSessionStorage := service.NewStorage(db)
 			createChatSessionService := service.NewService(cfg, createChatSessionStorage, client, model)
 			createChatSessionHandler := service.NewHandler(createChatSessionService)
-			api.POST("create-session", createChatSessionHandler.CreateChatSessionHandler)
+			api.POST("/session", createChatSessionHandler.CreateChatSessionHandler)
+		}
+
+		{
+			deleteChatSessionStorage := deletesession.NewStorage(db)
+			deleteChatSessionService := deletesession.NewService(deleteChatSessionStorage)
+			deleteChatSessionHandler := deletesession.NewHandler(deleteChatSessionService)
+			api.DELETE("/session/:sessionID", deleteChatSessionHandler.DeleteChatSessionHandler)
 		}
 
 		{
 			getMessageStorage := service.NewStorage(db)
 			getMessageService := service.NewService(cfg, getMessageStorage, client, model)
 			getMessageHandler := service.NewHandler(getMessageService)
-			api.POST("/message/gemini", getMessageHandler.ChatbotProcessHandler)
+			api.POST("/gemini", getMessageHandler.ChatbotProcessHandler)
 		}
 		{
 			getMessageStorage := service.NewStorage(db)
 			getMessageService := service.NewService(cfg, getMessageStorage, client, model)
 			getMessageHandler := service.NewHandler(getMessageService)
-			api.POST("/message/model", getMessageHandler.ChatbotProcessModelHandler)
+			api.POST("/model", getMessageHandler.ChatbotProcessModelHandler)
+		}
+
+		{
+			feedbackStorage := feedback.NewStorage(db)
+			feedbackService := feedback.NewService(feedbackStorage)
+			feedbackHandler := feedback.NewHandler(feedbackService)
+			api.PATCH("/feedback/:messageID", feedbackHandler.FeedbackHandler)
 		}
 
 	}

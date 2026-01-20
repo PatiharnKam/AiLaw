@@ -115,7 +115,7 @@ export default function WelcomePage() {
 
     try {
       const chatTitle = prompt.slice(0, 50)
-      const data = await apiFetch("/api/create-session", {
+      const data = await apiFetch("/api/session", {
         method: "POST",
         body: JSON.stringify({ title: chatTitle }),
       })

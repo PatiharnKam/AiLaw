@@ -10,7 +10,7 @@ const (
 	UnauthorizedErrorCode   = "10003"
 	InternalServerErrorCode = "99999"
 
-	UnauthorizedErrorMessage   = "unauthorizrd access"
+	UnauthorizedErrorMessage   = "unauthorized access"
 	InvalidRequestErrorMessage = "invalid request"
 	InternalServerErrorMessage = "internal server error"
 	ActionLogout               = "logout"

@@ -100,7 +100,7 @@ func (s *MessageService) ChatbotModelProcess(ctx context.Context, req ChatbotPro
 	}
 
 	modelmessageDetail := ModelMessageDetail{
-		Content: resp.Output.Content,
+		Content: resp.Content,
 	}
 
 	if modelmessageDetail.Content == strings.Trim(modelmessageDetail.Content, modelmessageDetail.Content) {
@@ -118,13 +118,21 @@ func (s *MessageService) ChatbotModelProcess(ctx context.Context, req ChatbotPro
 func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageModelResponse, error) {
 	client := &http.Client{}
 
+	// data := map[string]interface{}{
+	// 	"input": map[string]interface{}{
+	// 		"messages": []map[string]interface{}{
+	// 			{
+	// 				"role":    req.Input.Message[0].Role,
+	// 				"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
+	// 			},
+	// 		},
+	// 	},
+	// }
 	data := map[string]interface{}{
-		"input": map[string]interface{}{
-			"messages": []map[string]interface{}{
-				{
-					"role":    req.Input.Message[0].Role,
-					"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
-				},
+		"messages": []map[string]interface{}{
+			{
+				"role":    req.Input.Message[0].Role,
+				"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
 			},
 		},
 	}
