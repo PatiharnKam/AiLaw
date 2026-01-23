@@ -4,7 +4,7 @@ import "context"
 
 type Service interface {
 	CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (CreateChatSessionResponse, error)
-	ChatbotModelProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error)
+	ChatbotProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error)
 }
 
 type Storage interface {
@@ -45,7 +45,8 @@ type ChatbotProcessModelRequest struct {
 	UserId    string `json:"userId" validate:"required,uuid"`
 	SessionId string `json:"sessionId" binding:"required" validate:"required,uuid"`
 	// UserMessage string `json:"userMessage" binding:"required"`
-	Input Input `json:"input"`
+	// ModelType string `json:"modelType" binding:"required"`
+	Input     Input  `json:"input"`
 }
 
 type Input struct {

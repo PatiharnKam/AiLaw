@@ -53,6 +53,7 @@ type APIkey struct {
 	GeminiAPIkey string `env:"GEMINI_API_KEY"`
 	ModelAPIkey  string `env:"MODEL_API_KEY"`
 	ModelURL     string `env:"MODEL_URL"`
+	ModelCOTURL  string `env:"MODEL_COT_URL"`
 }
 
 type Database struct {

@@ -13,7 +13,8 @@ import (
 
 	"github.com/PatiharnKam/AiLaw/app/auth"
 	service "github.com/PatiharnKam/AiLaw/app/chatbot"
-	deletesession "github.com/PatiharnKam/AiLaw/app/delete_session"
+	deleteChatSession "github.com/PatiharnKam/AiLaw/app/delete_session"
+	updateSessionName "github.com/PatiharnKam/AiLaw/app/update_session_name"
 	feedback "github.com/PatiharnKam/AiLaw/app/feedback"
 	messageshistory "github.com/PatiharnKam/AiLaw/app/messages_history"
 	sessionshistory "github.com/PatiharnKam/AiLaw/app/sessions_history"
@@ -44,10 +45,10 @@ func main() {
 
 	corsConfig := cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PATCH", "DELETE"},
 		AllowHeaders:     []string{"Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true, // 👈 ต้องใส่ true
+		AllowCredentials: true,
 	})
 
 	r.Use(corsConfig)
@@ -100,10 +101,17 @@ func main() {
 		}
 
 		{
-			deleteChatSessionStorage := deletesession.NewStorage(db)
-			deleteChatSessionService := deletesession.NewService(deleteChatSessionStorage)
-			deleteChatSessionHandler := deletesession.NewHandler(deleteChatSessionService)
+			deleteChatSessionStorage := deleteChatSession.NewStorage(db)
+			deleteChatSessionService := deleteChatSession.NewService(deleteChatSessionStorage)
+			deleteChatSessionHandler := deleteChatSession.NewHandler(deleteChatSessionService)
 			api.DELETE("/session/:sessionID", deleteChatSessionHandler.DeleteChatSessionHandler)
+		}
+
+		{
+			updateSessionNameStorage := updateSessionName.NewStorage(db)
+			updateSessionNameService := updateSessionName.NewService(updateSessionNameStorage)
+			updateSessionNameHandler := updateSessionName.NewHandler(updateSessionNameService)
+			api.PATCH("/name/session/:sessionID", updateSessionNameHandler.UpdateSessionNameHandler)
 		}
 
 		{

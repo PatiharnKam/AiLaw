@@ -37,13 +37,13 @@ func (s *MessageService) CreateChatSessionService(ctx context.Context, req Creat
 	return *resp, nil
 }
 
-func (s *MessageService) ChatbotModelProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error) {
+func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error) {
 	err := s.storage.UpdateLastMessageAt(ctx, req.UserId, req.SessionId)
 	if err != nil {
 		return nil, fmt.Errorf("error when update last message at session : %w", err)
 	}
 
-	resp, err := s.callChatbot(ctx, req)
+	resp, err := s.callChatbot(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed when call chatbot : %w", err)
 	}
@@ -69,30 +69,13 @@ func (s *MessageService) ChatbotModelProcess(ctx context.Context, req ChatbotPro
 	return &GetMessageResponse{Message: modelmessageDetail.Content}, nil
 }
 
-func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageModelResponse, error) {
+func (s *MessageService) callChatbot(req ChatbotProcessModelRequest) (*GetMessageModelResponse, error) {
 	client := &http.Client{}
 
-	data := map[string]interface{}{
-		"messages": []map[string]interface{}{
-			{
-				"role":    req.Input.Message[0].Role,
-				"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
-			},
-		},
-	}
-
-	jsonData, err := json.Marshal(data)
+	reqHttp, err := s.setHttpRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("Error marshaling JSON: %w", err)
+		return nil, fmt.Errorf("error when setting http request : %w", err)
 	}
-	buffer := bytes.NewBuffer(jsonData)
-
-	reqHttp, err := http.NewRequest("POST", s.cfg.APIkey.ModelURL, buffer)
-	if err != nil {
-		return nil, fmt.Errorf("error when creating API request: %w", err)
-	}
-	reqHttp.Header.Set("Content-Type", "application/json")
-	reqHttp.Header.Set("Authorization", "Bearer "+s.cfg.APIkey.ModelAPIkey)
 
 	resp, err := client.Do(reqHttp)
 	if err != nil {
@@ -115,10 +98,39 @@ func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessMode
 	}
 
 	fmt.Println()
-	fmt.Println()
 	slog.Info("resp is", "response", response)
-	fmt.Println()
 	fmt.Println()
 
 	return &response, nil
+}
+
+func (s *MessageService) setHttpRequest(req ChatbotProcessModelRequest) (*http.Request, error) {
+	data := map[string]interface{}{
+		"messages": []map[string]interface{}{
+			{
+				"role":    req.Input.Message[0].Role,
+				"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("Error marshaling JSON: %w", err)
+	}
+	buffer := bytes.NewBuffer(jsonData)
+
+	modelURL := s.cfg.APIkey.ModelURL
+	// if req.ModelType == "COT" {
+	// 	modelURL = s.cfg.APIkey.ModelCOTURL
+	// }
+
+	reqHttp, err := http.NewRequest("POST", modelURL, buffer)
+	if err != nil {
+		return nil, fmt.Errorf("error when creating API request: %w", err)
+	}
+	reqHttp.Header.Set("Content-Type", "application/json")
+	reqHttp.Header.Set("Authorization", "Bearer "+s.cfg.APIkey.ModelAPIkey)
+
+	return reqHttp, nil
 }

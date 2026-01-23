@@ -88,7 +88,7 @@ func (h *Handler) ChatbotProcessModelHandler(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	resp, err := h.service.ChatbotModelProcess(ctx, req)
+	resp, err := h.service.ChatbotProcess(ctx, req)
 	if err != nil {
 		logger.Error("error from service layer : " + err.Error())
 		c.JSON(http.StatusInternalServerError, app.Response{

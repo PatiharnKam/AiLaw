@@ -45,6 +45,8 @@ func Config(dbUrl string, dbConnCfg DBConnectionConfig) (*pgxpool.Config, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a config, error: %v", err)
 	}
+
+	dbConfig.ConnConfig.RuntimeParams["timezone"] = "Asia/Bangkok"
 	dbConfig.MaxConns = int32(*dbConnCfg.MaxOpenConns)
 	dbConfig.MaxConnLifetime = time.Duration(*dbConnCfg.ConnMaxLifetime) * time.Minute
 	dbConfig.MaxConnIdleTime = time.Duration(*dbConnCfg.ConnMaxIdleTime) * time.Minute

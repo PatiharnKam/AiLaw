@@ -232,14 +232,16 @@ export default function WelcomePage() {
                   ref={(el) => {
                     if (el) {
                       el.style.height = 'auto'
-                      el.style.height = el.scrollHeight + 'px'
+                      const newHeight = Math.min(el.scrollHeight, 200) // จำกัดที่ 200px
+                      el.style.height = newHeight + 'px'
                     }
                   }}
                   value={prompt}
                   onChange={(e) => {
                     setUserPrompt(e.target.value)
                     e.target.style.height = 'auto'
-                    e.target.style.height = e.target.scrollHeight + 'px'
+                    const newHeight = Math.min(e.target.scrollHeight, 200) // จำกัดที่ 200px
+                    e.target.style.height = newHeight + 'px'
                   }}
                   placeholder="Type your message here..."
                   rows={1}
@@ -249,7 +251,7 @@ export default function WelcomePage() {
                       handleSubmit(e)
                     }
                   }}
-                  className={`w-full rounded-3xl px-6 py-4 pr-14 resize-none overflow-hidden focus:outline-none focus:ring-2 max-h-[200px] ${
+                  className={`custom-scroll w-full rounded-3xl px-6 py-4 pr-14 resize-none overflow-y-auto max-h-[200px] focus:outline-none focus:ring-2 ${
                     isDark 
                       ? "border border-[#EFF4FF]/30 bg-[#FFFFFF]/5 text-white placeholder-[#EFF4FF]/30 focus:border-[#EFF4FF]/30 focus:ring-[#EFF4FF]/20" 
                       : "border-2 border-slate-200 bg-white/80 backdrop-blur-sm text-slate-900 placeholder-slate-400 focus:border-[#D7DFFF] focus:ring-[indigo-500/20] shadow-sm"

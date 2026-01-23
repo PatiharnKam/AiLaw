@@ -1,6 +1,7 @@
-package deletechatsession
+package updatesessionname
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -10,20 +11,30 @@ import (
 )
 
 type Handler struct {
-	service   DeleteChatSessionService
+	service   UpdateSessionNameService
 	validator *validator.Validate
 }
 
-func NewHandler(service DeleteChatSessionService) *Handler {
+func NewHandler(service UpdateSessionNameService) *Handler {
 	return &Handler{
 		service:   service,
 		validator: validator.New(),
 	}
 }
 
-func (h *Handler) DeleteChatSessionHandler(c *gin.Context) {
+func (h *Handler) UpdateSessionNameHandler(c *gin.Context) {
 	logger := slog.Default()
-	var req DeleteChatSessionRequest
+	var req UpdateSessionNameRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error("invalid request body : " + err.Error())
+		fmt.Println(req)
+		c.JSON(http.StatusBadRequest, app.Response{
+			Code:    app.InvalidRequestErrorCode,
+			Message: app.InvalidRequestErrorMessage,
+		})
+		return
+	}
 
 	req.UserID = c.GetString("userId")
 	req.SessionID = c.Param("sessionID")
@@ -38,9 +49,9 @@ func (h *Handler) DeleteChatSessionHandler(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	err := h.service.DeleteChatSessionService(ctx, req)
+	err := h.service.UpdateSessionNameService(ctx, req)
 	if err != nil {
-		logger.Error("error while delete session history : " + err.Error())
+		logger.Error("error while update session name : " + err.Error())
 		c.JSON(http.StatusInternalServerError, app.Response{
 			Code:    app.InternalServerErrorCode,
 			Message: app.InternalServerErrorMessage,

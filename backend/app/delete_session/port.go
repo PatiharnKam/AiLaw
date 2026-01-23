@@ -1,4 +1,4 @@
-package deletesession
+package deletechatsession
 
 import "context"
 

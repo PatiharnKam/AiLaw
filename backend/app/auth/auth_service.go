@@ -152,7 +152,6 @@ func (s *authService) exchangeGoogleCode(code string) (string, error) {
 	return result.AccessToken, nil
 }
 
-// getGoogleUserInfo - ดึงข้อมูล User จาก Google
 func (s *authService) getGoogleUserInfo(accessToken string) (*GoogleUserInfo, error) {
 	userInfoURL := "https://www.googleapis.com/oauth2/v2/userinfo"
 
@@ -183,28 +182,21 @@ func (s *authService) getGoogleUserInfo(accessToken string) (*GoogleUserInfo, er
 }
 
 func (s *authService) RefreshTokenService(ctx context.Context, refreshToken string) (*RefreshTokenProcessResponse, error) {
-	// ตรวจสอบ refresh token
 	claims, err := s.validateRefreshToken(refreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token: %v", err)
 	}
 
-	// ตรวจสอบใน database
-	fmt.Println("start validate")
 	exists, err := s.storage.ValidateRefreshToken(ctx, claims.UserID, refreshToken)
 	if err != nil || !exists {
 		return nil, fmt.Errorf("refresh token not found or invalid")
 	}
 
-	// ลบ refresh token เก่า (rotation)
-	fmt.Println("start delete token")
 	err = s.storage.DeleteRefreshTokens(ctx, refreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete old refresh token: %v", err)
 	}
 
-	// สร้าง token pair ใหม่
-	fmt.Println("start generate")
 	newTokens, err := s.generateTokenPair(ctx, claims.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate new tokens: %v", err)

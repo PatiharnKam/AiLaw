@@ -13,7 +13,7 @@ interface Message {
   role: "user" | "model"
   content: string
   createdAt: string
-  feedback: string | null
+  feedback: number | null
 }
 
 interface Chat {
@@ -66,29 +66,6 @@ export default function ChatPage() {
     initialize()
   }, [])
 
-  // useEffect(() => {
-  //   const initAuth = async () => {
-  //     if (!accessToken) {
-  //       await refreshToken()
-  //       initializedRef.current = false
-  //     }
-  //   }
-  //   initAuth()
-
-  //   if (initializedRef.current) return
-  //   initializedRef.current = true;
-
-  //   (async () => {
-  //     await loadMessages()
-
-  //     if (prompt) {
-  //       await sendMessage(String(prompt))
-  //       setPrompt(null)
-  //     }
-  //   })()
-  // }, [accessToken, chatId])
-
-  // Scroll ลงล่างเมื่อมีข้อความใหม่
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [chat?.messages])
@@ -105,25 +82,6 @@ export default function ChatPage() {
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  const handleCopy = (content: string) => {
-    navigator.clipboard.writeText(content).then(() => {
-      console.log("Message copied to clipboard!");
-    }).catch((error) => {
-      console.error("Failed to copy message:", error);
-    });
-  };
-
-  const handleLike = (messageId: string) => {
-    console.log(`Liked message with ID: ${messageId}`);
-    // เพิ่มการทำงาน เช่น การอัปเดตสถานะ 'liked' ในฐานข้อมูล หรือ UI
-  };
-
-  const handleDislike = (messageId: string) => {
-    console.log(`Disliked message with ID: ${messageId}`);
-    // เพิ่มการทำงาน เช่น การอัปเดตสถานะ 'disliked' ในฐานข้อมูล หรือ UI
-  };
-
-  // 🔧 ดึงข้อความ model หรือ user แล้วเพิ่มเข้าแชท
   const appendMessage = useCallback((newMessages: Message[]) => {
     setChat(prev => ({
       sessionId: prev?.sessionId ?? chatId,
@@ -132,7 +90,6 @@ export default function ChatPage() {
     }))
   }, [chatId])
 
-  // 🔧 ฟังก์ชัน fetch wrapper รวมการ handle error
   const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
     if (isRefreshingRef.current) {
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -183,7 +140,6 @@ export default function ChatPage() {
     return data
   }, [getToken, refreshToken, logout]) // ✅ เพิ่ม dependencies ครบ
 
-  // โหลดข้อความใน session เดิม
   const loadMessages = useCallback(async () => {
     try {
       const data = await apiFetch(`/api/messages-history/${chatId}`, { method: "GET" })
@@ -214,13 +170,6 @@ export default function ChatPage() {
     setIsSending(true)
 
     try {
-      // const data = await apiFetch(`/api/message/gemini`, {
-      //   method: "POST",
-      //   body: JSON.stringify({
-      //     sessionId: chatId,
-      //     userMessage: messageContent,
-      //   }),
-      // })
       const data = await apiFetch(`/api/model`, {
         method: "POST",
         body: JSON.stringify({
@@ -265,6 +214,89 @@ export default function ChatPage() {
     sendMessage(messageToSend)
   }
 
+  const handleCopy = (content: string) => {
+    navigator.clipboard.writeText(content).then(() => {
+    }).catch((error) => {
+      console.error("Failed to copy message:", error);
+    });
+  };
+
+  const handleLike = useCallback(async (messageId: string) => {
+    try {
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: msg.feedback === 1 ? null : 1 } // Toggle like
+              : msg
+          )
+        }
+      })
+
+      await apiFetch(`/api/feedback/${messageId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          feedback: 1,
+        }),
+      })
+      console.log("✅ Liked message:", messageId)
+    } catch (error) {
+      console.error("Failed to send like feedback:", error)
+      // Revert ถ้า error
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: null }
+              : msg
+          )
+        }
+      })
+    }
+  }, [apiFetch])
+
+  const handleDislike = useCallback(async (messageId: string) => {
+    try {
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: msg.feedback === -1 ? null : -1 } // Toggle dislike
+              : msg
+          )
+        }
+      })
+
+      await apiFetch(`/api/feedback/${messageId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          feedback: -1,
+        }),
+      })
+      console.log("✅ Disliked message:", messageId)
+    } catch (error) {
+      console.error("Failed to send dislike feedback:", error)
+      // Revert ถ้า error
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: null }
+              : msg
+          )
+        }
+      })
+    }
+  }, [apiFetch])
+
   if (!chat) return null
 
   return (
@@ -289,8 +321,8 @@ export default function ChatPage() {
             onClick={() => setSidebarOpen(true)}
             className={`fixed top-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
               isDark
-                ? "bg-slate-800 text-white hover:bg-slate-700"
-                : "bg-white text-slate-900 hover:bg-slate-100 shadow-lg"
+                ? "bg-[#3C3C3C] text-white hover:bg-[#3C3C3C]"
+                : "bg-white text-slate-900 hover:bg-[#C7CDE4] shadow-lg"
             }`}
           >
             <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -301,7 +333,6 @@ export default function ChatPage() {
 
         {/* Main Chat Area */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          {/* <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"> */}
           <div className="custom-scroll flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
             {chat.messages.length === 0 ? (
               <div className={`text-center py-12 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
@@ -319,7 +350,11 @@ export default function ChatPage() {
                           <div className="flex items-center mt-2 mb-6 w-[86%] mx-auto">
                             <button 
                               onClick={() => handleCopy(message.content)} 
-                              className="flex items-center justify-center p-2 cursor-pointer"
+                              className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                                isDark
+                                  ? "hover:bg-[#3C3C3C]"
+                                  : "hover:bg-[#C7CDE4]"
+                              }`}
                               aria-label="Copy message"
                             >
                               <Image
@@ -331,7 +366,15 @@ export default function ChatPage() {
                             </button>
                             <button 
                               onClick={() => handleLike(message.messageId)} 
-                              className="flex items-center justify-center p-2 cursor-pointer"
+                              className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                                message.feedback === 1
+                                  ? isDark
+                                    ? "bg-[#3C3C3C]"
+                                    : "bg-[#C7CDE4]" 
+                                  : isDark
+                                    ? "hover:bg-[#3C3C3C]"
+                                    : "hover:bg-[#C7CDE4]"
+                              }`}
                               aria-label="Like message"
                             >
                               <Image
@@ -343,7 +386,15 @@ export default function ChatPage() {
                             </button>
                             <button 
                               onClick={() => handleDislike(message.messageId)} 
-                              className="flex items-center justify-center p-2 cursor-pointer"
+                              className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                                message.feedback === -1
+                                  ? isDark
+                                    ? "bg-[#3C3C3C]"
+                                    : "bg-[#C7CDE4]" 
+                                  : isDark
+                                    ? "hover:bg-[#3C3C3C]"
+                                    : "hover:bg-[#C7CDE4]"
+                              }`}
                               aria-label="Dislike message"
                             >
                               <Image
@@ -488,14 +539,15 @@ const ChatInput = ({
           ref={(el) => {
             if (el) {
               el.style.height = 'auto';
-              el.style.height = el.scrollHeight + 'px';
+              const newHeight = Math.min(el.scrollHeight, 200)
+              el.style.height = newHeight + 'px'
             }
           }}
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
-            e.target.style.height = 'auto';
-            e.target.style.height = e.target.scrollHeight + 'px';
+            const newHeight = Math.min(e.target.scrollHeight, 200)
+            e.target.style.height = newHeight + 'px'
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -506,7 +558,7 @@ const ChatInput = ({
           disabled={isSending}
           placeholder={isSending ? "Sending..." : "Type your message..."}
           rows={1}
-          className={`w-full rounded-3xl px-6 py-3 pr-14 resize-none overflow-hidden focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed max-h-[200px] ${
+          className={`custom-scroll w-full rounded-3xl px-6 py-3 pr-14 resize-none overflow-y-auto focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed max-h-[200px] ${
             isDark
               ? "border border-[#EFF4FF]/30 bg-[#FFFFFF]/5 text-white placeholder-[#EFF4FF]/30 focus:border-[#EFF4FF]/30 focus:ring-[#EFF4FF]/20"
               : "border-2 border-slate-200 bg-white text-slate-900 placeholder-slate-400 focus:border-[#D7DFFF] focus:ring-[indigo-500/20] shadow-sm"
