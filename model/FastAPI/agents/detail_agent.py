@@ -253,12 +253,46 @@ class DetailsAgent():
     
     async def get_response_non_COT(self, question: str):
         question = deepcopy(question)
-        print("Non COT : Start ....")
+        print("Detail Agent : Start non-COT ....")
+        print("Detail Agent : Embedding ......")
+        embedding = get_embedding(self.token, self.embedding_url, [question])[0]
+        
+        print("Detail Agent : Get closest ......")
+        result = get_closest_result(self.pc, self.index_name, embedding)
+        
+        print("Detail Agent : Get Content from Vector database")
+        matches = result.get("matches", [])
+        docs_str = self.get_detail(matches)
+        
+        detail_content = f"""
+            Question:
+            {question}
+            
+            Relevant text:
+            {docs_str}
+            
+            Rules:
+            1. "sections":
+                - List all relevant legal provisions (มาตรา) by number only.
+                - Example: "มาตรา ๒๔๓, มาตรา ๒๔๔".
+
+            2. "ans":
+                - First, write out the full text of each relevant section, using ONLY the wording that appears in the Relevant text above.
+                    Example format:
+                    มาตรา ๒๔๓ [เนื้อหาของมาตราตามที่ปรากฏใน Relevant text]
+                - After listing all sections, write a clear Thai explanation that answers the Original question,
+                    based strictly on those sections. The explanation must be in Thai.
+                - Do NOT invent or modify any legal text. Use only sentences that already appear in the Relevant text.
+
+            3. If the information in Relevant text is insufficient or you cannot determine the answer:
+                - Set "sections" to "ไม่ทราบ"
+                - Set "ans" to "ไม่ทราบ"
+        """
         messages = [
             {"role":"system","content": self.system_prompt},
-            {"role":"user","content": question},
+            {"role":"user","content": detail_content},
         ]
-        print("Non COT : Prompting......")
-        chatbot_output = await get_chatbot_response(self.client, self.model_name, messages)
+        print("Detail Agent : non-COT Prompting ......")
+        chatbot_output = get_chatbot_response(self.client, self.model_name, messages)
         output = self.postprocess(chatbot_output)
         return output
