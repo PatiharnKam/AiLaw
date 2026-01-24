@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { SharedSidebar } from "@/components/shared-sidebar"
+import { ChatInput } from "@/components/chat-input"
 import { usePrompt } from "@/components/prompt-context"
 import { useAuth } from "../../providers"
 
@@ -34,6 +35,7 @@ export default function ChatPage() {
   const [isDark, setIsDark] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isSending, setIsSending] = useState(false)
+  const [modelType, setModelType] = useState<"NORMAL" | "COT">("NORMAL")
   const { accessToken, logout, refreshToken, getToken } = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { prompt, setPrompt } = usePrompt()
@@ -154,7 +156,6 @@ export default function ChatPage() {
     }
   }, [apiFetch, chatId, router])
 
-  // 🔧 ส่งข้อความ (ใช้ได้ทั้ง initial prompt และ user input)
   const sendMessage = useCallback(async (messageContent: string, role: "user" | "model" = "user") => {
     if (!messageContent.trim()) return
 
@@ -174,6 +175,7 @@ export default function ChatPage() {
         method: "POST",
         body: JSON.stringify({
           sessionId: chatId,
+          modelType: modelType, // ส่ง modelType ที่เลือก
           input: {
             messages: [
               { role: "user", content: messageContent }
@@ -197,7 +199,7 @@ export default function ChatPage() {
     } finally {
       setIsSending(false)
     }
-  }, [appendMessage, apiFetch, chatId])
+  }, [appendMessage, apiFetch, chatId, modelType]) // เพิ่ม modelType ใน dependencies
 
   // Theme toggle
   const toggleTheme = () => {
@@ -428,6 +430,8 @@ export default function ChatPage() {
             handleSubmit={handleSubmit}
             isSending={isSending}
             isDark={isDark}
+            modelType={modelType}
+            setModelType={setModelType}
           />
         </main>
       </div>
@@ -516,70 +520,5 @@ const TypingIndicator = ({ isDark }: { isDark: boolean }) => (
         </span>
       </div>
     </div>
-  </div>
-)
-
-const ChatInput = ({
-  input,
-  setInput,
-  handleSubmit,
-  isSending,
-  isDark,
-}: {
-  input: string
-  setInput: React.Dispatch<React.SetStateAction<string>>
-  handleSubmit: (e: React.FormEvent) => void
-  isSending: boolean
-  isDark: boolean
-}) => (
-  <div className={`p-4`}>
-    <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
-      <div className="relative">
-        <textarea
-          ref={(el) => {
-            if (el) {
-              el.style.height = 'auto';
-              const newHeight = Math.min(el.scrollHeight, 200)
-              el.style.height = newHeight + 'px'
-            }
-          }}
-          value={input}
-          onChange={(e) => {
-            setInput(e.target.value);
-            const newHeight = Math.min(e.target.scrollHeight, 200)
-            e.target.style.height = newHeight + 'px'
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-          disabled={isSending}
-          placeholder={isSending ? "Sending..." : "Type your message..."}
-          rows={1}
-          className={`custom-scroll w-full rounded-3xl px-6 py-3 pr-14 resize-none overflow-y-auto focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed max-h-[200px] ${
-            isDark
-              ? "border border-[#EFF4FF]/30 bg-[#FFFFFF]/5 text-white placeholder-[#EFF4FF]/30 focus:border-[#EFF4FF]/30 focus:ring-[#EFF4FF]/20"
-              : "border-2 border-slate-200 bg-white text-slate-900 placeholder-slate-400 focus:border-[#D7DFFF] focus:ring-[indigo-500/20] shadow-sm"
-          }`}
-        ></textarea>
-        <button
-          type="submit"
-          disabled={!input.trim() || isSending}
-          className={`absolute right-2 bottom-3 flex h-9 w-9 items-center justify-center rounded-3xl text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-            isDark ? "bg-[#F3F3F3]" : "bg-[#485BA9]"
-          }`}
-        >
-          <Image
-            src="/send-logo.svg"
-            width={24}
-            height={24}
-            alt="icon"
-            className={isDark ? "" : "invert"}
-          />
-        </button>
-      </div>
-    </form>
   </div>
 )
