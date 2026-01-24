@@ -109,7 +109,7 @@ func (s *MessageService) setHttpRequest(req ChatbotProcessModelRequest) (*http.R
 		"messages": []map[string]interface{}{
 			{
 				"role":    req.Input.Message[0].Role,
-				"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
+				"content": req.Input.Message[0].Content,
 			},
 		},
 	}
@@ -121,9 +121,9 @@ func (s *MessageService) setHttpRequest(req ChatbotProcessModelRequest) (*http.R
 	buffer := bytes.NewBuffer(jsonData)
 
 	modelURL := s.cfg.APIkey.ModelURL
-	// if req.ModelType == "COT" {
-	// 	modelURL = s.cfg.APIkey.ModelCOTURL
-	// }
+	if req.ModelType == "COT" {
+		modelURL = s.cfg.APIkey.ModelCOTURL
+	}
 
 	reqHttp, err := http.NewRequest("POST", modelURL, buffer)
 	if err != nil {

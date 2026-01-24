@@ -4,6 +4,7 @@ import React from "react"
 import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { useModelType } from "@/hooks/useModelType"
 import { SharedSidebar } from "@/components/shared-sidebar"
 import { ChatInput } from "@/components/chat-input"
 import { usePrompt } from "@/components/prompt-context"
@@ -35,12 +36,13 @@ export default function ChatPage() {
   const [isDark, setIsDark] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isSending, setIsSending] = useState(false)
-  const [modelType, setModelType] = useState<"NORMAL" | "COT">("NORMAL")
+  const { modelType, setModelType } = useModelType()
   const { accessToken, logout, refreshToken, getToken } = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { prompt, setPrompt } = usePrompt()
   const initializedRef = useRef(false)
   const isRefreshingRef = useRef(false)
+  
 
   useEffect(() => {
     if (initializedRef.current) return

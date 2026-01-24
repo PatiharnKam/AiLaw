@@ -23,12 +23,6 @@ type CreateChatSessionResponse struct {
 	SessionId string `json:"sessionId"`
 }
 
-type ChatbotProcessRequest struct {
-	UserId      string `json:"userId" validate:"required,uuid"`
-	SessionId   string `json:"sessionId" binding:"required" validate:"required,uuid"`
-	UserMessage string `json:"userMessage" binding:"required"`
-}
-
 type ModelMessageDetail struct {
 	Content          string  `json:"message"`
 	Feedback         *string `json:"feedback"`
@@ -45,7 +39,7 @@ type ChatbotProcessModelRequest struct {
 	UserId    string `json:"userId" validate:"required,uuid"`
 	SessionId string `json:"sessionId" binding:"required" validate:"required,uuid"`
 	// UserMessage string `json:"userMessage" binding:"required"`
-	// ModelType string `json:"modelType" binding:"required"`
+	ModelType string `json:"modelType" binding:"required"`
 	Input     Input  `json:"input"`
 }
 
@@ -69,23 +63,3 @@ type Memory struct {
 	Agent    string `json:"agent"`
 	Sections string `json:"sections"`
 }
-
-// type GetMessageModelResponse struct {
-// 	DelayTime     int    `json:"delayTime"`
-// 	ExecutionTime int    `json:"executionTime"`
-// 	Id            string `json:"id"`
-// 	Output        Output `json:"output"`
-// 	Status        string `json:"status"`
-// 	WorkerId      string `json:"workerId"`
-// }
-
-// type Output struct {
-// 	Content string `json:"content"`
-// 	Memory  Memory `json:"memory"`
-// 	Role    string `json:"role"`
-// }
-
-// type Memory struct {
-// 	Agent         string `json:"agent"`
-// 	GuardDecision string `json:"guard_decision"`
-// }

@@ -4,6 +4,7 @@ import type React from "react"
 import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { useModelType } from "@/hooks/useModelType"
 import { SharedSidebar } from "@/components/shared-sidebar"
 import { ChatInput } from "@/components/chat-input"
 import { useAuth } from "../providers"
@@ -16,7 +17,7 @@ export default function WelcomePage() {
   const [prompt, setUserPrompt] = useState("")
   const [isDark, setIsDark] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [modelType, setModelType] = useState<"NORMAL" | "COT">("NORMAL")
+  const { modelType, setModelType } = useModelType()
   const { accessToken, logout, refreshToken, getToken } = useAuth()
   const { setPrompt } = usePrompt()
   const initializedRef = useRef(false)

@@ -73,7 +73,7 @@ func (h *Handler) GoogleCallback(c *gin.Context) {
 		30*24*60*60, // 30 days
 		"/auth",     // จำกัดเฉพาะ refresh endpoint
 		"",
-		true, // secure=true ใน production
+		true, 
 		true, // httpOnly=true
 	)
 
@@ -114,7 +114,6 @@ func (h *Handler) RefreshTokenProcess(c *gin.Context) {
 		"refresh_token",
 		resp.RefreshToken,
 		30*24*60*60, // 30 days
-		// "/auth/refresh", // จำกัดเฉพาะ refresh endpoint
 		"/auth", // จำกัดเฉพาะ refresh endpoint
 		"",
 		true, // secure=true ใน production

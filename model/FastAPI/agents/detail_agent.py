@@ -255,10 +255,11 @@ class DetailsAgent():
         question = deepcopy(question)
         print("Detail Agent : Start non-COT ....")
         print("Detail Agent : Embedding ......")
-        embedding = get_embedding(self.token, self.embedding_url, [question])[0]
+        embedding_result = await get_embedding(self.token, self.embedding_url, [question])
+        vector = embedding_result[0]
         
         print("Detail Agent : Get closest ......")
-        result = get_closest_result(self.pc, self.index_name, embedding)
+        result = await get_closest_result(self.pc, self.index_name, vector)
         
         print("Detail Agent : Get Content from Vector database")
         matches = result.get("matches", [])
@@ -293,6 +294,6 @@ class DetailsAgent():
             {"role":"user","content": detail_content},
         ]
         print("Detail Agent : non-COT Prompting ......")
-        chatbot_output = get_chatbot_response(self.client, self.model_name, messages)
+        chatbot_output = await get_chatbot_response(self.client, self.model_name, messages)
         output = self.postprocess(chatbot_output)
         return output
