@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os, json
 from copy import deepcopy
-from .utils  import get_chatbot_response, get_embedding, get_closest_result
+from .utils  import get_chatbot_response, get_embedding, get_closest_result, get_chatbot_full_response
 from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_SYSTEM_PROMTPS
 # from openai import OpenAI
 from openai import AsyncOpenAI
@@ -68,7 +68,11 @@ class DetailsAgent():
         self.STEP_DEFINER_SYSTEM_PROMPT = STEP_DEFINER_SYSTEM_PROMPT
         self.system_prompt = DETAIL_SYSTEM_PROMTPS
 
-    def postprocess(self, output):
+    def postprocess(self, 
+                    output,
+                    input_token,
+                    output_token,
+                    total_token):
         output = json.loads(output)
         dict_output = {
             "role" : "assistant",
@@ -76,7 +80,10 @@ class DetailsAgent():
             "memory" : {
                 "agent" : "detail agent",
                 "sections" : output['sections']
-            }
+            },
+            "input_tokens" :input_token,
+            "output_tokens":output_token,
+            "total_tokens" :total_token
         }
         return dict_output
 
@@ -247,8 +254,11 @@ class DetailsAgent():
         ]
         print("Detail Agent : user content")
         print("Detail Agent : Prompting......")
-        chatbot_output = await get_chatbot_response(self.client, self.model_name, messages)
-        output = self.postprocess(chatbot_output)
+        chatbot_output = await get_chatbot_full_response(self.client, self.model_name, messages)
+        output = self.postprocess(output       = chatbot_output.choices[0].message.content,
+                                  input_token  = chatbot_output.usage.prompt_tokens,
+                                  output_token = chatbot_output.usage.completion_tokens,
+                                  total_token  = chatbot_output.usage.total_tokens)
         return output
     
     async def get_response_non_COT(self, question: str):
@@ -294,6 +304,9 @@ class DetailsAgent():
             {"role":"user","content": detail_content},
         ]
         print("Detail Agent : non-COT Prompting ......")
-        chatbot_output = await get_chatbot_response(self.client, self.model_name, messages)
-        output = self.postprocess(chatbot_output)
+        chatbot_output = await get_chatbot_full_response(self.client, self.model_name, messages)
+        output = self.postprocess(output       = chatbot_output.choices[0].message.content,
+                                  input_token  = chatbot_output.usage.prompt_tokens,
+                                  output_token = chatbot_output.usage.completion_tokens,
+                                  total_token  = chatbot_output.usage.total_tokens)
         return output

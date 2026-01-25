@@ -63,7 +63,10 @@ async def chat_completions(request: ChatRequest):
             "role": "assistant",
             "content": detail_response["content"],
             "decision": "processed",
-            "memory": detail_response.get("memory", {})
+            "memory": detail_response.get("memory", {}),
+            "input_tokens" : detail_response.get("input_tokens", {}),
+            "output_tokens" : detail_response.get("output_tokens", {}),
+            "total_tokens" : detail_response.get("total_tokens", {})
         }
 
     except Exception as e:
@@ -95,7 +98,10 @@ async def chat_completions(request: ChatRequest):
             "role": "assistant",
             "content": detail_response["content"],
             "decision": "processed",
-            "memory": detail_response.get("memory", {})
+            "memory": detail_response.get("memory", {}),
+            "input_tokens" : detail_response.get("input_tokens", {}),
+            "output_tokens" : detail_response.get("output_tokens", {}),
+            "total_tokens" : detail_response.get("total_tokens", {})
         }
 
     except Exception as e:
