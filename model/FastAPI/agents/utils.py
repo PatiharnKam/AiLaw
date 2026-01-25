@@ -15,6 +15,18 @@ async def get_chatbot_response(client, model_name, messages, temperature=0):
     
     return response.choices[0].message.content
 
+async def get_chatbot_full_response(client, model_name, messages, temperature=0):
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=temperature,
+        top_p=0.1,
+        max_tokens=8192,
+        response_format={"type": "json_object"}
+    )
+    
+    return response
+
 async def get_embedding(RUNPOD_API_KEY, RUNPOD_EMBEDDING_URL, texts):
     headers = {
         'Content-Type': 'application/json',
