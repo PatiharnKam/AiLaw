@@ -18,24 +18,6 @@ func NewHandler(service AuthService) *Handler {
 	}
 }
 
-func (h *Handler) GetToken(c *gin.Context) {
-	ctx := c.Request.Context()
-	resp, err := h.service.GetToken(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, app.Response{
-			Code:    app.InternalServerErrorCode,
-			Message: err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, app.Response{
-		Code:    app.SUCCESS_CODE,
-		Message: app.SUCCESS_MSG,
-		Data:    resp,
-	})
-}
-
 func (h *Handler) GoogleLogin(c *gin.Context) {
 	email := c.Query("email")
 	loginURL := h.service.GetGoogleLoginURL(email)

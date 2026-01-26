@@ -6,7 +6,6 @@ import (
 )
 
 type AuthService interface {
-	GetToken(ctx context.Context) (*TokenPair, error)
 	GetGoogleLoginURL(email string) string
 	HandleGoogleCallback(ctx context.Context, req GoogleCallbackRequest) (*LoginResponse, error)
 	RefreshTokenService(ctx context.Context, refreshToken string) (*RefreshTokenProcessResponse, error)

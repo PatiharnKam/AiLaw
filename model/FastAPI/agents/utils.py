@@ -16,7 +16,7 @@ async def get_chatbot_response(client, model_name, messages, temperature=0):
     return response.choices[0].message.content
 
 async def get_chatbot_full_response(client, model_name, messages, temperature=0):
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model_name,
         messages=messages,
         temperature=temperature,

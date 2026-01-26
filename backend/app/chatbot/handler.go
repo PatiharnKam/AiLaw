@@ -65,7 +65,7 @@ func (h *Handler) CreateChatSessionHandler(c *gin.Context) {
 
 func (h *Handler) ChatbotProcessModelHandler(c *gin.Context) {
 	logger := slog.Default()
-	var req ChatbotProcessModelRequest
+	var req ChatbotProcessRequest
 
 	req.UserId = c.GetString("userId")
 

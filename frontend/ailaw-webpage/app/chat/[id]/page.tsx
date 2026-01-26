@@ -42,6 +42,7 @@ export default function ChatPage() {
   const { prompt, setPrompt } = usePrompt()
   const initializedRef = useRef(false)
   const isRefreshingRef = useRef(false)
+  const previousMessageCountRef = useRef(0)
   
 
   useEffect(() => {
@@ -60,7 +61,6 @@ export default function ChatPage() {
 
       await loadMessages()
 
-      // ถ้ามี initial prompt ให้ส่งทันที
       if (prompt) {
         await sendMessage(String(prompt))
         setPrompt(null)
@@ -71,7 +71,14 @@ export default function ChatPage() {
   }, [])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    const currentMessageCount = chat?.messages?.length || 0
+    
+    //Check for new message
+    if (currentMessageCount > previousMessageCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+    
+    previousMessageCountRef.current = currentMessageCount
   }, [chat?.messages])
 
   useEffect(() => {
@@ -142,7 +149,7 @@ export default function ChatPage() {
 
     if (!res.ok) throw new Error(data.message || "API request failed")
     return data
-  }, [getToken, refreshToken, logout]) // ✅ เพิ่ม dependencies ครบ
+  }, [getToken, refreshToken, logout])
 
   const loadMessages = useCallback(async () => {
     try {
@@ -177,17 +184,15 @@ export default function ChatPage() {
         method: "POST",
         body: JSON.stringify({
           sessionId: chatId,
-          modelType: modelType, // ส่ง modelType ที่เลือก
+          modelType: modelType,
           input: {
-            messages: [
-              { role: "user", content: messageContent }
-            ]
+            messages: { role: "user", content: messageContent }
           }
         }),
       })
 
       const modelMessage: Message = {
-        messageId: crypto.randomUUID(),
+        messageId: data.data.modelMessageID,
         role: "model",
         content: data.data?.message || "No response",
         createdAt: new Date().toISOString(),
@@ -201,7 +206,7 @@ export default function ChatPage() {
     } finally {
       setIsSending(false)
     }
-  }, [appendMessage, apiFetch, chatId, modelType]) // เพิ่ม modelType ใน dependencies
+  }, [appendMessage, apiFetch, chatId, modelType])
 
   // Theme toggle
   const toggleTheme = () => {
@@ -233,7 +238,7 @@ export default function ChatPage() {
           ...prev,
           messages: prev.messages.map(msg =>
             msg.messageId === messageId
-              ? { ...msg, feedback: msg.feedback === 1 ? null : 1 } // Toggle like
+              ? { ...msg, feedback: msg.feedback === 1 ? null : 1 }
               : msg
           )
         }
@@ -248,7 +253,6 @@ export default function ChatPage() {
       console.log("✅ Liked message:", messageId)
     } catch (error) {
       console.error("Failed to send like feedback:", error)
-      // Revert ถ้า error
       setChat(prev => {
         if (!prev) return prev
         return {
@@ -271,7 +275,7 @@ export default function ChatPage() {
           ...prev,
           messages: prev.messages.map(msg =>
             msg.messageId === messageId
-              ? { ...msg, feedback: msg.feedback === -1 ? null : -1 } // Toggle dislike
+              ? { ...msg, feedback: msg.feedback === -1 ? null : -1 }
               : msg
           )
         }
@@ -286,7 +290,6 @@ export default function ChatPage() {
       console.log("✅ Disliked message:", messageId)
     } catch (error) {
       console.error("Failed to send dislike feedback:", error)
-      // Revert ถ้า error
       setChat(prev => {
         if (!prev) return prev
         return {
@@ -307,9 +310,6 @@ export default function ChatPage() {
     <div className={isDark ? "dark" : ""}>
       <div
         className={`flex h-screen transition-all duration-300 ${!sidebarOpen ? 'bg-center' : 'bg-[center_right_-130px]'} ${isDark ? "bg-cover bg-[url('/dark-bg.png')] text-white" : "bg-cover bg-[url('/light-bg.png')] text-slate-900"}`}
-        // className={`flex h-screen ${
-        //   isDark ? "bg-[#1E1E1E] text-white" : "bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 text-slate-900"
-        // }`}
       >
         {/* Sidebar */}
         <SharedSidebar
@@ -446,7 +446,6 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
   return (
     <div className={`flex gap-4 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
-        // <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
         <div className="flex h-12 w-12 items-center justify-center rounded-full ">
           <Image
             src="/AiLaw.png"
@@ -459,21 +458,13 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
       )}
       <div 
         className={`max-w-[90%] md:max-w-[90%] rounded-2xl px-5 py-3 ${
-        // className={`max-w-[85%] md:max-w-2xl rounded-2xl px-5 py-3 ${
           isUser
             ? isDark
               ? "bg-white/10 text-white"
               : "bg-[#4557A1] text-white"
-              // : "bg-[#E8EAF3] text-slate-900"
             : isDark
               ? "text-slate-100"
               : "text-slate-900"
-            // ? isDark
-            //   ? "bg-[#3C3C3C] text-white"
-            //   : "bg-white/80 text-slate-900"
-            // : isDark
-            //   ? "bg-[#3C3C3C] text-slate-100"
-            //   : "bg-white/80 backdrop-blur-sm text-slate-900 shadow-sm"
         }`}
       >
         <p className="text-pretty leading-relaxed whitespace-pre-wrap ">{message.content}</p>
@@ -508,7 +499,6 @@ const TypingIndicator = ({ isDark }: { isDark: boolean }) => (
     </div>
     <div
       className={`max-w-[85%] md:max-w-2xl rounded-2xl px-5 py-3 ${
-        // isDark ? "bg-slate-800 text-slate-100" : "bg-white/80 backdrop-blur-sm text-slate-900 shadow-sm"
         isDark ? "text-slate-100" : "text-slate-900"
       }`}
     >

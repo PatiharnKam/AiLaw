@@ -4,14 +4,14 @@ import "context"
 
 type Service interface {
 	CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (CreateChatSessionResponse, error)
-	ChatbotProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error)
+	ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (*GetMessageResponse, error)
 }
 
 type Storage interface {
 	CreateSession(ctx context.Context, req CreateChatSessionRequest) (*CreateChatSessionResponse, error)
 	UpdateLastMessageAt(ctx context.Context, userId string, sessionId string) error
-	SaveUserMessage(ctx context.Context, sessionId, userMessage string) error
-	SaveModelMessage(ctx context.Context, sessionId string, modelDetail ModelMessageDetail) error
+	SaveUserMessage(ctx context.Context, sessionId, userMessage string, promptTokens int) error
+	SaveModelMessage(ctx context.Context, sessionId string, modelDetail ModelMessageDetail) (string, error)
 }
 
 type CreateChatSessionRequest struct {
@@ -32,19 +32,19 @@ type ModelMessageDetail struct {
 }
 
 type GetMessageResponse struct {
-	Message string `json:"message"`
+	Message        string `json:"message"`
+	ModelMessageID string `json:"modelMessageID"`
 }
 
-type ChatbotProcessModelRequest struct {
+type ChatbotProcessRequest struct {
 	UserId    string `json:"userId" validate:"required,uuid"`
 	SessionId string `json:"sessionId" binding:"required" validate:"required,uuid"`
-	// UserMessage string `json:"userMessage" binding:"required"`
 	ModelType string `json:"modelType" binding:"required"`
 	Input     Input  `json:"input"`
 }
 
 type Input struct {
-	Message []Messages `json:"messages"`
+	Messages Messages `json:"messages"`
 }
 
 type Messages struct {
@@ -52,11 +52,18 @@ type Messages struct {
 	Content string `json:"content" binding:"required"`
 }
 
-type GetMessageModelResponse struct {
-	Role     string `json:"role"`
-	Content  string `json:"content"`
-	Desicion string `json:"desicion"`
-	Memory   Memory `json:"memory"`
+type ChatbotRequest struct {
+	Messages []Messages `json:"messages"`
+}
+
+type ChatbotResponse struct {
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	Desicion     string `json:"desicion"`
+	Memory       Memory `json:"memory"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	TotalTokens  int    `json:"total_tokens"`
 }
 
 type Memory struct {

@@ -14,17 +14,15 @@ import (
 	"github.com/PatiharnKam/AiLaw/app/auth"
 	service "github.com/PatiharnKam/AiLaw/app/chatbot"
 	deleteChatSession "github.com/PatiharnKam/AiLaw/app/delete_session"
-	updateSessionName "github.com/PatiharnKam/AiLaw/app/update_session_name"
 	feedback "github.com/PatiharnKam/AiLaw/app/feedback"
 	messageshistory "github.com/PatiharnKam/AiLaw/app/messages_history"
+	"github.com/PatiharnKam/AiLaw/app/quota"
 	sessionshistory "github.com/PatiharnKam/AiLaw/app/sessions_history"
+	updateSessionName "github.com/PatiharnKam/AiLaw/app/update_session_name"
 	"github.com/PatiharnKam/AiLaw/config"
-	database "github.com/PatiharnKam/AiLaw/db"
 	"github.com/PatiharnKam/AiLaw/middleware"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
 )
 
 const (
@@ -40,8 +38,6 @@ func main() {
 		slog.Error("unable to parse specific config", " error :", err.Error())
 		return
 	}
-	r := gin.New()
-	r.Use(gin.Recovery())
 
 	corsConfig := cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
@@ -50,10 +46,15 @@ func main() {
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	})
+	r := gin.New()
+	r.Use(
+		gin.Recovery(),
+		corsConfig,
+		middleware.LoggerMiddleware(),
+	)
+	r.GET("/health", health())
 
-	r.Use(corsConfig)
-
-	db, err := database.NewPostgresDB(cfg.Database.PostgresURL, database.DBConnectionConfig{
+	db, err := config.NewPostgresDB(cfg.Database.PostgresURL, config.DBConnectionConfig{
 		ConnMaxLifetime:   &cfg.Database.PostgresConnMaxLifetime,
 		ConnMaxIdleTime:   &cfg.Database.PostgresConnMaxIdleTime,
 		MaxOpenConns:      &cfg.Database.PostgresMaxOpenConns,
@@ -61,27 +62,13 @@ func main() {
 	})
 	defer db.Close()
 
-	r.GET("/health", health())
-
-	apiKey := cfg.APIkey.GeminiAPIkey
-	if apiKey == "" {
-		slog.Error("GEMINI_API_KEY environment variable is required")
-	}
-
-	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	redisClient, err := config.NewRedisClient(cfg.Redis)
 	if err != nil {
-		slog.Error("Failed to create Gemini client ", "error :", err.Error())
+		slog.Error("Failed to connect to Redis: %w", err)
 	}
+	defer redisClient.Close()
 
-	model := client.GenerativeModel("gemini-2.5-flash")
-
-	model.GenerationConfig = genai.GenerationConfig{
-		Temperature:     genai.Ptr(float32(0.7)),
-		TopK:            genai.Ptr(int32(40)),
-		TopP:            genai.Ptr(float32(0.95)),
-		MaxOutputTokens: genai.Ptr(int32(1024)),
-	}
+	quotaService := quota.NewQuotaService(redisClient, &cfg.Quota)
 
 	api := r.Group("/api")
 	api.Use(middleware.GinJWTMiddleware(cfg))
@@ -116,14 +103,14 @@ func main() {
 
 		{
 			createChatSessionStorage := service.NewStorage(db)
-			createChatSessionService := service.NewService(cfg, createChatSessionStorage, client)
+			createChatSessionService := service.NewService(cfg, createChatSessionStorage, quotaService)
 			createChatSessionHandler := service.NewHandler(createChatSessionService)
 			api.POST("/session", createChatSessionHandler.CreateChatSessionHandler)
 		}
 
 		{
 			getMessageStorage := service.NewStorage(db)
-			getMessageService := service.NewService(cfg, getMessageStorage, client)
+			getMessageService := service.NewService(cfg, getMessageStorage, quotaService)
 			getMessageHandler := service.NewHandler(getMessageService)
 			api.POST("/model", getMessageHandler.ChatbotProcessModelHandler)
 		}
@@ -141,7 +128,6 @@ func main() {
 		authStorage := auth.NewStorage(db)
 		authService := auth.NewService(cfg, authStorage)
 		authHandler := auth.NewHandler(authService)
-		r.GET("/token", authHandler.GetToken)
 		r.GET("/auth/google/login", authHandler.GoogleLogin)
 		r.GET("/auth/google/callback", authHandler.GoogleCallback)
 		r.POST("/auth/refresh", authHandler.RefreshTokenProcess)

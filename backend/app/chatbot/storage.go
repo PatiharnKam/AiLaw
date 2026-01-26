@@ -60,16 +60,17 @@ func (s *storage) UpdateLastMessageAt(ctx context.Context, userId string, sessio
 	return nil
 }
 
-func (s *storage) SaveUserMessage(ctx context.Context, sessionId, userMessage string) error {
+func (s *storage) SaveUserMessage(ctx context.Context, sessionId, userMessage string, promptTokens int) error {
 	query := `INSERT INTO chat_messages 
-				(message_id, session_id, role ,content, created_at)
-			VALUES ($1, $2, $3, $4, $5)`
+				(message_id, session_id, role ,content, created_at, prompt_tokens)
+			VALUES ($1, $2, $3, $4, $5, $6)`
 	_, err := s.db.Exec(ctx, query,
 		uuid.NewString(),
 		sessionId,
 		"user",
 		userMessage,
 		time.Now(),
+		promptTokens,
 	)
 	if err != nil {
 		return fmt.Errorf("error when insert data: %v", err)
@@ -77,14 +78,14 @@ func (s *storage) SaveUserMessage(ctx context.Context, sessionId, userMessage st
 	return nil
 }
 
-func (s *storage) SaveModelMessage(ctx context.Context, sessionId string, modelDetail ModelMessageDetail) error {
+func (s *storage) SaveModelMessage(ctx context.Context, sessionId string, modelDetail ModelMessageDetail) (string, error) {
 	query := `INSERT INTO chat_messages 
 			(message_id, session_id, role ,content, created_at , feedback,
 			prompt_tokens, completion_tokens, response_time)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-
+	messageID := uuid.NewString()
 	_, err := s.db.Exec(ctx, query,
-		uuid.NewString(),
+		messageID,
 		sessionId,
 		"model",
 		modelDetail.Content,
@@ -95,7 +96,7 @@ func (s *storage) SaveModelMessage(ctx context.Context, sessionId string, modelD
 		modelDetail.ResponseTime,
 	)
 	if err != nil {
-		return fmt.Errorf("error when insert data: %v", err)
+		return "", fmt.Errorf("error when insert data: %v", err)
 	}
-	return nil
+	return messageID, nil
 }

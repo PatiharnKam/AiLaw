@@ -26,15 +26,6 @@ func NewService(cfg *config.Config, storage AuthStorage) *authService {
 	}
 }
 
-func (s *authService) GetToken(ctx context.Context) (*TokenPair, error) {
-	userId := "c345bb0e-0dfd-487b-83f8-da940d23c7fd"
-	token, err := s.generateTokenPair(ctx, userId)
-	if err != nil {
-		return nil, err
-	}
-	return token, nil
-}
-
 // GetGoogleLoginURL - สร้าง URL สำหรับ redirect ไป Google
 func (s *authService) GetGoogleLoginURL(email string) string {
 	baseURL := "https://accounts.google.com/o/oauth2/v2/auth"

@@ -1,4 +1,4 @@
-package database
+package config
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func NewPostgresDB(dbUrl string, dbConnCfg DBConnectionConfig) (*pgxpool.Pool, e
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cfg, err := Config(dbUrl, dbConnCfg)
+	cfg, err := DBConfig(dbUrl, dbConnCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a config, error: %v", err)
 	}
@@ -40,7 +40,7 @@ func NewPostgresDB(dbUrl string, dbConnCfg DBConnectionConfig) (*pgxpool.Pool, e
 	return connPool, nil
 }
 
-func Config(dbUrl string, dbConnCfg DBConnectionConfig) (*pgxpool.Config, error) {
+func DBConfig(dbUrl string, dbConnCfg DBConnectionConfig) (*pgxpool.Config, error) {
 	dbConfig, err := pgxpool.ParseConfig(dbUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a config, error: %v", err)
