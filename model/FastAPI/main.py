@@ -16,7 +16,7 @@ from agents.guard_agent import GuardAgent
 from agents.detail_agent import DetailsAgent
 
 # Streaming agents
-from agents_streaming import DetailsAgentStreaming
+from agents.detail_agent_streaming import DetailsAgentStreaming
 
 app = FastAPI(title="Legal Chatbot API")
 

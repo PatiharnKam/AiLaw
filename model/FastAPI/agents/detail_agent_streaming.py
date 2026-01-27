@@ -6,12 +6,11 @@ from typing import AsyncGenerator, Callable, Optional
 from .utils import (
     get_chatbot_response,
     get_chatbot_full_response,
-    get_chatbot_response_stream,
     get_chatbot_full_response_stream,
     get_embedding,
     get_closest_result
 )
-from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_SYSTEM_PROMTPS , DETAIL_STREAMING_SYSTEM_PROMTPS
+from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_STREAMING_SYSTEM_PROMTPS
 from openai import AsyncOpenAI
 from pinecone import Pinecone
 
@@ -68,7 +67,6 @@ class DetailsAgentStreaming:
 
         self.PLANNER_SYSTEM_PROMPT = PLANNER_SYSTEM_PROMPT
         self.STEP_DEFINER_SYSTEM_PROMPT = STEP_DEFINER_SYSTEM_PROMPT
-        self.system_prompt = DETAIL_SYSTEM_PROMTPS
         self.streaming_system_prompt = DETAIL_STREAMING_SYSTEM_PROMTPS
 
 
@@ -84,7 +82,7 @@ class DetailsAgentStreaming:
 
     def joined_text(self, history_text):
         self.joined_history_text = "".join(
-            f"question: {item['question']}\n"
+            # f"question: {item['question']}\n"
             f"sections: {item['sections']}\n"
             f"ans: {item['ans']}\n\n"
             for item in history_text
@@ -92,7 +90,8 @@ class DetailsAgentStreaming:
 
     def join_step(self, history_text):
         for index, item in enumerate(history_text):
-            self.joined_step += f"{index+1}.{item['question']}\n"
+            # self.joined_step += f"{index+1}.{item['question']}\n"
+            self.joined_step += f"{index+1}.{item}\n"
 
     # ============ Non-COT Streaming ============
     
@@ -257,7 +256,7 @@ class DetailsAgentStreaming:
             self.history_text.append(response_qa)
             self.joined_text(self.history_text)
 
-            print(f"question : {response_qa['question']}")
+            # print(f"question : {response_qa['question']}")
             print(f"sections : {response_qa['sections']}")
             print(f"ANS : {response_qa['ans']}")
             print(f"Step {index+1} completed: {response_qa.get('question', 'N/A')}")

@@ -1,7 +1,66 @@
-import requests
 import json
+import tiktoken
 import httpx
 import asyncio
+from typing import AsyncGenerator
+
+def count_tokens(text: str, model: str = "gpt-4") -> int:
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    return len(encoding.encode(text))
+
+def count_messages_tokens(messages: list, model: str = "gpt-4") -> int:
+    total = 0
+    for msg in messages:
+        total += count_tokens(msg.get("content", ""), model)
+        total += 4  
+    total += 2
+    return total
+
+async def get_chatbot_full_response_stream(
+    client, 
+    model_name: str, 
+    messages: list,
+    temperature: float = 0
+) -> AsyncGenerator[dict, None]:
+
+    response = await client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=temperature,
+        top_p=0.1,
+        max_tokens=8192,
+        stream=True,
+        stream_options={"include_usage": True}  # Get usage at the end
+    )
+    
+    full_content = ""
+    
+    async for chunk in response:
+        # Content chunk
+        if chunk.choices and chunk.choices[0].delta.content:
+            text = chunk.choices[0].delta.content
+            full_content += text
+            yield {
+                "type": "content",
+                "text": text
+            }
+        
+    input_tokens = count_messages_tokens(messages)
+    output_tokens = count_tokens(full_content)
+    total_tokens = input_tokens + output_tokens
+    
+    print(f"Counted - input: {input_tokens}, output: {output_tokens}, total: {total_tokens}")
+    
+    yield {
+        "type": "usage",
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "full_content": full_content
+    }
 
 async def get_chatbot_response(client, model_name, messages, temperature=0):
     response = await client.chat.completions.create(
