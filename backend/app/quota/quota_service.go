@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/PatiharnKam/AiLaw/config"
+	"github.com/pkoukk/tiktoken-go"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -73,4 +74,22 @@ func (s *Service) ConsumeTokens(ctx context.Context, userID string, totalTokens 
 	}
 
 	return nil
+}
+
+func (s *Service) CheckPromptLength(text string) (int, error) {
+	var encoding *tiktoken.Tiktoken
+	encoding, err := tiktoken.EncodingForModel("gpt-4")
+	if err != nil {
+		return 0, err
+	}
+	tokens := encoding.Encode(text, nil, nil)
+	tokenCount := len(tokens)
+
+	isWithinLimit := tokenCount <= s.maxPromptTokens
+
+	if !isWithinLimit {
+		return 0, fmt.Errorf("Prompt exceeds maximum token limit")
+	}
+
+	return tokenCount, nil
 }

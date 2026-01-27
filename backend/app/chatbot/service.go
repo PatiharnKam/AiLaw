@@ -1,4 +1,4 @@
-package service
+package chatbot
 
 import (
 	"bytes"
@@ -11,13 +11,13 @@ import (
 
 	"github.com/PatiharnKam/AiLaw/app/quota"
 	"github.com/PatiharnKam/AiLaw/config"
-	"github.com/pkoukk/tiktoken-go"
 )
 
 type MessageService struct {
 	cfg          *config.Config
 	storage      Storage
 	quotaService quota.QuotaService
+	httpClient   *http.Client
 }
 
 func NewService(cfg *config.Config, storage Storage, quotaService quota.QuotaService) *MessageService {
@@ -25,6 +25,7 @@ func NewService(cfg *config.Config, storage Storage, quotaService quota.QuotaSer
 		cfg:          cfg,
 		storage:      storage,
 		quotaService: quotaService,
+		httpClient:   &http.Client{Timeout: 0},
 	}
 
 }
@@ -38,7 +39,7 @@ func (s *MessageService) CreateChatSessionService(ctx context.Context, req Creat
 }
 
 func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (*GetMessageResponse, error) {
-	userPromptTokens, err := s.CheckPromptLength(req.Input.Messages.Content)
+	userPromptTokens, err := s.quotaService.CheckPromptLength(req.Input.Messages.Content)
 	if err != nil {
 		return nil, fmt.Errorf("prompt length exceeded : %w", err)
 	}
@@ -60,7 +61,7 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 		return nil, fmt.Errorf("error when update last message at session : %w", err)
 	}
 
-	resp, err := s.callChatbot(req)
+	resp, err := s.callChatbot(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed when call chatbot : %w", err)
 	}
@@ -96,38 +97,8 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 	}, nil
 }
 
-func (s *MessageService) callChatbot(req ChatbotProcessRequest) (*ChatbotResponse, error) {
-	client := &http.Client{}
+func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessRequest) (*ChatbotResponse, error) {
 
-	reqHttp, err := s.setHttpRequest(req)
-	if err != nil {
-		return nil, fmt.Errorf("error when setting http request : %w", err)
-	}
-
-	resp, err := client.Do(reqHttp)
-	if err != nil {
-		return nil, fmt.Errorf("error whell calling API Model : %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("error reading response body from model: %w", err)
-	}
-
-	var response ChatbotResponse
-	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
-	}
-
-	return &response, nil
-}
-
-func (s *MessageService) setHttpRequest(req ChatbotProcessRequest) (*http.Request, error) {
 	data := ChatbotRequest{
 		Messages: []Messages{
 			{
@@ -141,37 +112,38 @@ func (s *MessageService) setHttpRequest(req ChatbotProcessRequest) (*http.Reques
 	if err != nil {
 		return nil, fmt.Errorf("Error marshaling JSON: %w", err)
 	}
-	buffer := bytes.NewBuffer(jsonData)
 
 	modelURL := s.cfg.Model.ModelURL
 	if req.ModelType == "COT" {
 		modelURL = s.cfg.Model.ModelCOTURL
 	}
 
-	reqHttp, err := http.NewRequest("POST", modelURL, buffer)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", modelURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("error when creating API request: %w", err)
 	}
-	reqHttp.Header.Set("Content-Type", "application/json")
-	reqHttp.Header.Set("Authorization", "Bearer "+s.cfg.Model.ModelAPIkey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.cfg.Model.ModelAPIkey)
 
-	return reqHttp, nil
-}
-
-func (s *MessageService) CheckPromptLength(text string) (int, error) {
-	var encoding *tiktoken.Tiktoken
-	encoding, err := tiktoken.EncodingForModel("gpt-4")
+	httpResp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("error whell calling API Model : %w", err)
 	}
-	tokens := encoding.Encode(text, nil, nil)
-	tokenCount := len(tokens)
+	defer httpResp.Body.Close()
 
-	isWithinLimit := tokenCount <= s.cfg.Quota.MaxPromptTokens
-
-	if !isWithinLimit {
-		return 0, fmt.Errorf("Prompt exceeds maximum token limit")
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status: %d", httpResp.StatusCode)
 	}
 
-	return tokenCount, nil
+	httpRespBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body from model: %w", err)
+	}
+
+	var response ChatbotResponse
+	if err := json.Unmarshal(httpRespBody, &response); err != nil {
+		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+	}
+
+	return &response, nil
 }

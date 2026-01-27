@@ -12,4 +12,5 @@ type QuotaStatus struct {
 type QuotaService interface {
 	CheckQuota(ctx context.Context, userID string) (*QuotaStatus, error)
 	ConsumeTokens(ctx context.Context, userID string, totalTokens int64) error
+	CheckPromptLength(text string) (int, error)
 }

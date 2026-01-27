@@ -1,4 +1,4 @@
-package service
+package chatbot
 
 import (
 	"log/slog"

@@ -21,7 +21,7 @@ func InitConfig() (*Config, error) {
 
 type Config struct {
 	Server   Server
-	Model   Model
+	Model    Model
 	JWT      JWT
 	Google   Google
 	Database Database `envPrefix:"POSTGRES_"`
@@ -46,9 +46,11 @@ type Server struct {
 }
 
 type Model struct {
-	ModelAPIkey  string `env:"MODEL_API_KEY"`
-	ModelURL     string `env:"MODEL_URL"`
-	ModelCOTURL  string `env:"MODEL_COT_URL"`
+	ModelAPIkey       string `env:"MODEL_API_KEY"`
+	ModelURL          string `env:"MODEL_URL"`
+	ModelCOTURL       string `env:"MODEL_COT_URL"`
+	ModelStreamURL    string `env:"MODEL_STREAM_URL"`
+	ModelCOTStreamURL string `env:"MODEL_COT_STREAM_URL"`
 }
 
 type Database struct {
@@ -69,5 +71,5 @@ type Redis struct {
 
 type Quota struct {
 	DailyLimit      int64 `env:"DAILY_LIMIT"`
-	MaxPromptTokens int `env:"MAX_PROMPT_TOKENS"`
+	MaxPromptTokens int   `env:"MAX_PROMPT_TOKENS"`
 }

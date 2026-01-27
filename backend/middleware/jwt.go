@@ -15,35 +15,56 @@ import (
 
 func GinJWTMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			slog.Error("Authorization header required")
-			c.JSON(http.StatusUnauthorized, app.Response{
-				Code:    app.UnauthorizedErrorCode,
-				Message: app.UnauthorizedErrorMessage,
-				Data: JWTErrorActionResponse{
-					Action: app.ActionLogout,
-				},
-			})
-			c.Abort()
-			return
+		var tokenString string
+
+		isWebSocket := c.GetHeader("Upgrade") == "websocket" ||
+			c.GetHeader("Connection") == "Upgrade" ||
+			strings.Contains(strings.ToLower(c.GetHeader("Connection")), "upgrade")
+		if isWebSocket {
+			tokenString = c.Query("token")
+			if tokenString == "" {
+				slog.Error("WebSocket: token query parameter required")
+				c.JSON(http.StatusUnauthorized, app.Response{
+					Code:    app.UnauthorizedErrorCode,
+					Message: app.UnauthorizedErrorMessage,
+					Data: JWTErrorActionResponse{
+						Action: app.ActionLogout,
+					},
+				})
+				c.Abort()
+				return
+			}
+		} else {
+			authHeader := c.GetHeader("Authorization")
+			if authHeader == "" {
+				slog.Error("Authorization header required")
+				c.JSON(http.StatusUnauthorized, app.Response{
+					Code:    app.UnauthorizedErrorCode,
+					Message: app.UnauthorizedErrorMessage,
+					Data: JWTErrorActionResponse{
+						Action: app.ActionLogout,
+					},
+				})
+				c.Abort()
+				return
+			}
+
+			bearerToken := strings.Split(authHeader, " ")
+			if len(bearerToken) != 2 || bearerToken[0] != "Bearer" {
+				slog.Error("Invalid authorization header format")
+				c.JSON(http.StatusUnauthorized, app.Response{
+					Code:    app.UnauthorizedErrorCode,
+					Message: app.UnauthorizedErrorMessage,
+					Data: JWTErrorActionResponse{
+						Action: app.ActionLogout,
+					},
+				})
+				c.Abort()
+				return
+			}
+			tokenString = bearerToken[1]
 		}
 
-		bearerToken := strings.Split(authHeader, " ")
-		if len(bearerToken) != 2 || bearerToken[0] != "Bearer" {
-			slog.Error("Invalid authorization header format")
-			c.JSON(http.StatusUnauthorized, app.Response{
-				Code:    app.UnauthorizedErrorCode,
-				Message: app.UnauthorizedErrorMessage,
-				Data: JWTErrorActionResponse{
-					Action: app.ActionLogout,
-				},
-			})
-			c.Abort()
-			return
-		}
-
-		// แปลง public key string -> *rsa.PublicKey
 		pubKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(cfg.JWT.PublicKey))
 		if err != nil {
 			slog.Error("failed to parse public key")
@@ -58,19 +79,16 @@ func GinJWTMiddleware(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		// parse token ด้วย RS256
-		token, err := jwt.ParseWithClaims(bearerToken[1], &auth.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-			// เช็คว่าใช้ algorithm ที่ถูกต้อง
+		token, err := jwt.ParseWithClaims(tokenString, &auth.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return pubKey, nil
 		})
 
-		// จัดการ Error
 		if err != nil {
 			if errors.Is(err, jwt.ErrTokenExpired) {
-				slog.Error("access token expired go to refresh token : %w", err)
+				slog.Error("access token expired go to refresh token", "error", err)
 				c.JSON(http.StatusUnauthorized, app.Response{
 					Code:    app.UnauthorizedErrorCode,
 					Message: app.UnauthorizedErrorMessage,
@@ -82,7 +100,7 @@ func GinJWTMiddleware(cfg *config.Config) gin.HandlerFunc {
 				return
 			}
 
-			slog.Error("failed when check JWT token error : %w", err)
+			slog.Error("failed when check JWT token", "error", err)
 			c.JSON(http.StatusUnauthorized, app.Response{
 				Code:    app.UnauthorizedErrorCode,
 				Message: app.UnauthorizedErrorMessage,

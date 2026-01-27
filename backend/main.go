@@ -113,6 +113,7 @@ func main() {
 			getMessageService := service.NewService(cfg, getMessageStorage, quotaService)
 			getMessageHandler := service.NewHandler(getMessageService)
 			api.POST("/model", getMessageHandler.ChatbotProcessModelHandler)
+			api.GET("/ws", getMessageHandler.WebSocketHandler)
 		}
 
 		{

@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useModelType } from "@/hooks/useModelType"
+import { useWebSocket, WSResponse } from "@/hooks/useWebSocket"
 import { SharedSidebar } from "@/components/shared-sidebar"
 import { ChatInput } from "@/components/chat-input"
 import { usePrompt } from "@/components/prompt-context"
@@ -16,6 +17,7 @@ interface Message {
   content: string
   createdAt: string
   feedback: number | null
+  isStreaming?: boolean  // New: flag for streaming message
 }
 
 interface Chat {
@@ -43,14 +45,99 @@ export default function ChatPage() {
   const initializedRef = useRef(false)
   const isRefreshingRef = useRef(false)
   const previousMessageCountRef = useRef(0)
-  
+  const streamingMessageIdRef = useRef<string | null>(null)
 
+  // ============ WebSocket Setup ============
+  const handleChunk = useCallback((content: string, sessionId: string) => {
+    console.log("📝 Chunk received, length:", content.length)
+
+    setChat(prev => {
+      if (!prev) return prev
+
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            content: m.content + content,
+          }
+        }
+        return m
+      })
+
+      return { ...prev, messages }
+    })
+  }, [])
+
+  const handleDone = useCallback((response: WSResponse) => {
+    setChat(prev => {
+      if (!prev) return prev
+
+      const streamingMsg = prev.messages.find(m => m.isStreaming)
+      if (!streamingMsg) {
+        console.log("⚠️ No streaming message in state!")
+        return prev
+      }
+
+      console.log("📝 Found streaming message:", streamingMsg.messageId)
+
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            messageId: response.modelMessageId || m.messageId,
+            isStreaming: false,  
+          }
+        }
+        return m
+      })
+
+      return { ...prev, messages }
+    })
+
+    streamingMessageIdRef.current = null
+    setIsSending(false)
+
+    if (response.usage) {
+      console.log("Token usage:", response.usage)
+    }
+  }, [])
+
+  const handleError = useCallback((error: string) => {
+    setChat(prev => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        messages: prev.messages.map(m => {
+          if (m.isStreaming) {
+            return {
+              ...m,
+              content: m.content || `เกิดข้อผิดพลาด: ${error}`,
+              isStreaming: false,
+            }
+          }
+          return m
+        }),
+      }
+    })
+    
+    streamingMessageIdRef.current = null
+    setIsSending(false)
+  }, [])
+
+  const { isConnected, sendChat } = useWebSocket(accessToken, {
+    onChunk: handleChunk,
+    onDone: handleDone,
+    onError: handleError,
+    onConnect: () => console.log("WebSocket connected"),
+    onDisconnect: () => console.log("WebSocket disconnected"),
+  })
+
+  // ============ Initialization ============
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
 
     const initialize = async () => {
-      // รอ token ถ้ายังไม่มี
       if (!accessToken) {
         const refreshed = await refreshToken()
         if (!refreshed) {
@@ -79,28 +166,34 @@ export default function ChatPage() {
     }
     
     previousMessageCountRef.current = currentMessageCount
-  }, [chat?.messages])
+  }, [chat?.messages?.length])
 
   useEffect(() => {
+  const streamingMessage = chat?.messages.find(m => m.isStreaming)
+  
+  if (streamingMessage) {
+    // ใช้ requestAnimationFrame เพื่อรอ DOM update
+    const scrollToBottom = () => {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      })
+    }
+    
+    scrollToBottom()
+  }
+}, [chat?.messages])
 
+  useEffect(() => {
     const savedTheme = localStorage.getItem("chatbot-theme")
     if (savedTheme) setIsDark(savedTheme === "dark")
 
     const handleResize = () => setSidebarOpen(window.innerWidth >= 768)
     handleResize()
-
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  const appendMessage = useCallback((newMessages: Message[]) => {
-    setChat(prev => ({
-      sessionId: prev?.sessionId ?? chatId,
-      title: prev?.title ?? "New Chat",
-      messages: [...(prev?.messages ?? []), ...newMessages],
-    }))
-  }, [chatId])
-
+  // ============ API Functions ============
   const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
     if (isRefreshingRef.current) {
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -108,7 +201,6 @@ export default function ChatPage() {
     }
 
     const currentToken = getToken()
-
     const res = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
       headers: {
@@ -122,9 +214,7 @@ export default function ChatPage() {
     const data = await res.json()
 
     if (data?.data?.action === "logout") {
-      console.log("🚪 Logout action received")
       logout()
-      throw new Error("Logged out")
     }
     
     if (data?.data?.action === "refresh") {
@@ -133,7 +223,6 @@ export default function ChatPage() {
         return apiFetch(path, options)
       }
 
-      console.log("🔄 Refresh token needed")
       isRefreshingRef.current = true
       const refreshed = await refreshToken()
       isRefreshingRef.current = false
@@ -141,7 +230,6 @@ export default function ChatPage() {
       if (refreshed) {
         return apiFetch(path, options)
       } else {
-        console.log("❌ Refresh failed, logging out")
         logout()
         throw new Error("Refresh failed")
       }
@@ -165,50 +253,105 @@ export default function ChatPage() {
     }
   }, [apiFetch, chatId, router])
 
-  const sendMessage = useCallback(async (messageContent: string, role: "user" | "model" = "user") => {
-    if (!messageContent.trim()) return
+  // ============ Send Message (WebSocket) ============
+  const sendMessage = useCallback(async (messageContent: string) => {
+    if (!messageContent.trim() || isSending) return
 
+    const tempUserId = crypto.randomUUID()
+    const tempModelId = crypto.randomUUID()
+
+    // Add user message
     const userMessage: Message = {
-      messageId: crypto.randomUUID(),
-      role,
+      messageId: tempUserId,
+      role: "user",
       content: messageContent,
       createdAt: new Date().toISOString(),
       feedback: null,
     }
 
-    appendMessage([userMessage])
-    setIsSending(true)
+    // Add empty model message (will be filled by streaming)
+    const modelMessage: Message = {
+      messageId: tempModelId,
+      role: "model",
+      content: "",
+      createdAt: new Date().toISOString(),
+      feedback: null,
+      isStreaming: true,
+    }
 
+    setChat(prev => ({
+      sessionId: prev?.sessionId ?? chatId,
+      title: prev?.title ?? "New Chat",
+      messages: [...(prev?.messages ?? []), userMessage, modelMessage],
+    }))
+
+    setIsSending(true)
+    streamingMessageIdRef.current = tempModelId
+
+    // Send via WebSocket
+    const sent = sendChat(chatId, messageContent, modelType)
+
+    if (!sent) {
+      // Fallback to HTTP if WebSocket not connected
+      console.warn("WebSocket not connected, falling back to HTTP")
+      await sendMessageHTTP(messageContent, tempUserId, tempModelId)
+    }
+    // await sendMessageHTTP(messageContent, tempUserId, tempModelId)
+  }, [chatId, modelType, isSending, sendChat])
+
+  // Fallback HTTP send (if WebSocket fails)
+  const sendMessageHTTP = useCallback(async (
+    messageContent: string,
+    tempUserId: string,
+    tempModelId: string
+  ) => {
     try {
       const data = await apiFetch(`/api/model`, {
         method: "POST",
         body: JSON.stringify({
           sessionId: chatId,
           modelType: modelType,
-          input: {
-            messages: { role: "user", content: messageContent }
-          }
+          input: { messages: { role: "user", content: messageContent } },
         }),
       })
 
-      const modelMessage: Message = {
-        messageId: data.data.modelMessageID,
-        role: "model",
-        content: data.data?.message || "No response",
-        createdAt: new Date().toISOString(),
-        feedback: null,
-      }
-
-      appendMessage([modelMessage])
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(m => {
+            if (m.messageId === tempModelId) {
+              return {
+                ...m,
+                messageId: data.data.modelMessageID,
+                content: data.data?.message || "No response",
+                isStreaming: false,
+              }
+            }
+            return m
+          }),
+        }
+      })
     } catch (error) {
-      console.error("Failed to send message:", error)
+      console.error("HTTP fallback failed:", error)
+      // Remove messages on error
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.filter(
+            m => m.messageId !== tempUserId && m.messageId !== tempModelId
+          ),
+        }
+      })
       setInput(messageContent)
     } finally {
       setIsSending(false)
+      streamingMessageIdRef.current = null
     }
-  }, [appendMessage, apiFetch, chatId, modelType])
+  }, [apiFetch, chatId, modelType])
 
-  // Theme toggle
+  // ============ Event Handlers ============
   const toggleTheme = () => {
     const newTheme = !isDark
     setIsDark(newTheme)
@@ -224,11 +367,8 @@ export default function ChatPage() {
   }
 
   const handleCopy = (content: string) => {
-    navigator.clipboard.writeText(content).then(() => {
-    }).catch((error) => {
-      console.error("Failed to copy message:", error);
-    });
-  };
+    navigator.clipboard.writeText(content)
+  }
 
   const handleLike = useCallback(async (messageId: string) => {
     try {
@@ -240,30 +380,16 @@ export default function ChatPage() {
             msg.messageId === messageId
               ? { ...msg, feedback: msg.feedback === 1 ? null : 1 }
               : msg
-          )
+          ),
         }
       })
 
       await apiFetch(`/api/feedback/${messageId}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          feedback: 1,
-        }),
+        body: JSON.stringify({ feedback: 1 }),
       })
-      console.log("✅ Liked message:", messageId)
     } catch (error) {
       console.error("Failed to send like feedback:", error)
-      setChat(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          messages: prev.messages.map(msg =>
-            msg.messageId === messageId
-              ? { ...msg, feedback: null }
-              : msg
-          )
-        }
-      })
     }
   }, [apiFetch])
 
@@ -277,30 +403,16 @@ export default function ChatPage() {
             msg.messageId === messageId
               ? { ...msg, feedback: msg.feedback === -1 ? null : -1 }
               : msg
-          )
+          ),
         }
       })
 
       await apiFetch(`/api/feedback/${messageId}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          feedback: -1,
-        }),
+        body: JSON.stringify({ feedback: -1 }),
       })
-      console.log("✅ Disliked message:", messageId)
     } catch (error) {
       console.error("Failed to send dislike feedback:", error)
-      setChat(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          messages: prev.messages.map(msg =>
-            msg.messageId === messageId
-              ? { ...msg, feedback: null }
-              : msg
-          )
-        }
-      })
     }
   }, [apiFetch])
 
@@ -309,8 +421,32 @@ export default function ChatPage() {
   return (
     <div className={isDark ? "dark" : ""}>
       <div
-        className={`flex h-screen transition-all duration-300 ${!sidebarOpen ? 'bg-center' : 'bg-[center_right_-130px]'} ${isDark ? "bg-cover bg-[url('/dark-bg.png')] text-white" : "bg-cover bg-[url('/light-bg.png')] text-slate-900"}`}
+        className={`flex h-screen transition-all duration-300 ${
+          !sidebarOpen ? "bg-center" : "bg-[center_right_-130px]"
+        } ${
+          isDark
+            ? "bg-cover bg-[url('/dark-bg.png')] text-white"
+            : "bg-cover bg-[url('/light-bg.png')] text-slate-900"
+        }`}
       >
+        {/* Connection Status Indicator */}
+        <div className="fixed top-4 right-4 z-50">
+          <div
+            className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
+              isConnected
+                ? "bg-green-500/20 text-green-400"
+                : "bg-red-500/20 text-red-400"
+            }`}
+          >
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? "bg-green-400" : "bg-red-400"
+              }`}
+            />
+            {isConnected ? "Connected" : "Disconnected"}
+          </div>
+        </div>
+
         {/* Sidebar */}
         <SharedSidebar
           isDark={isDark}
@@ -343,85 +479,76 @@ export default function ChatPage() {
                 No messages yet. Start the conversation!
               </div>
             ) : (
-                  chat.messages.map((message) => {
-                    const isUser = message.role === "user";
-                    
-                    return (
-                      <React.Fragment key={message.messageId}>
-                        <MessageBubble message={message} isDark={isDark} />
-                        
-                        {!isUser && (
-                          <div className="flex items-center mt-2 mb-6 w-[86%] mx-auto">
-                            <button 
-                              onClick={() => handleCopy(message.content)} 
-                              className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
-                                isDark
-                                  ? "hover:bg-[#3C3C3C]"
-                                  : "hover:bg-[#C7CDE4]"
-                              }`}
-                              aria-label="Copy message"
-                            >
-                              <Image
-                                src={isDark ? "/copy-dark.png" : "/copy-light.png"}
-                                alt="Copy"
-                                width={18}
-                                height={18}
-                              />
-                            </button>
-                            <button 
-                              onClick={() => handleLike(message.messageId)} 
-                              className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
-                                message.feedback === 1
-                                  ? isDark
-                                    ? "bg-[#3C3C3C]"
-                                    : "bg-[#C7CDE4]" 
-                                  : isDark
-                                    ? "hover:bg-[#3C3C3C]"
-                                    : "hover:bg-[#C7CDE4]"
-                              }`}
-                              aria-label="Like message"
-                            >
-                              <Image
-                                src={isDark ? "/like-dark.png" : "/like-light.png"}
-                                alt="Like"
-                                width={18}
-                                height={18}
-                              />
-                            </button>
-                            <button 
-                              onClick={() => handleDislike(message.messageId)} 
-                              className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
-                                message.feedback === -1
-                                  ? isDark
-                                    ? "bg-[#3C3C3C]"
-                                    : "bg-[#C7CDE4]" 
-                                  : isDark
-                                    ? "hover:bg-[#3C3C3C]"
-                                    : "hover:bg-[#C7CDE4]"
-                              }`}
-                              aria-label="Dislike message"
-                            >
-                              <Image
-                                src={isDark ? "/dislike-dark.png" : "/dislike-light.png"}
-                                alt="Dislike"
-                                width={18}
-                                height={18}
-                              />
-                            </button>
-                          </div>
-                        )}
-                        {!isUser && (
-                          <div
-                            className={`mt-4 mb-6 h-[0.5px] w-[86%] mx-auto ${isDark ? "bg-white/10" : "bg-[#D7DFFF]"}`}
-                          ></div>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
-                )}
+              chat.messages.map((message) => {
+                const isUser = message.role === "user"
 
-            {/* Loading Indicator */}
-            {isSending && <TypingIndicator isDark={isDark} />}
+                return (
+                  <React.Fragment key={message.messageId}>
+                    <MessageBubble 
+                      message={message} 
+                      isDark={isDark}
+                      isStreaming={message.isStreaming}
+                    />
+
+                    {!isUser && !message.isStreaming && (
+                      <div className="flex items-center mt-2 mb-6 w-[86%] mx-auto">
+                        <button
+                          onClick={() => handleCopy(message.content)}
+                          className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                            isDark ? "hover:bg-[#3C3C3C]" : "hover:bg-[#C7CDE4]"
+                          }`}
+                        >
+                          <Image
+                            src={isDark ? "/copy-dark.png" : "/copy-light.png"}
+                            alt="Copy"
+                            width={18}
+                            height={18}
+                          />
+                        </button>
+                        <button
+                          onClick={() => handleLike(message.messageId)}
+                          className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                            message.feedback === 1
+                              ? isDark ? "bg-[#3C3C3C]" : "bg-[#C7CDE4]"
+                              : isDark ? "hover:bg-[#3C3C3C]" : "hover:bg-[#C7CDE4]"
+                          }`}
+                        >
+                          <Image
+                            src={isDark ? "/like-dark.png" : "/like-light.png"}
+                            alt="Like"
+                            width={18}
+                            height={18}
+                          />
+                        </button>
+                        <button
+                          onClick={() => handleDislike(message.messageId)}
+                          className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                            message.feedback === -1
+                              ? isDark ? "bg-[#3C3C3C]" : "bg-[#C7CDE4]"
+                              : isDark ? "hover:bg-[#3C3C3C]" : "hover:bg-[#C7CDE4]"
+                          }`}
+                        >
+                          <Image
+                            src={isDark ? "/dislike-dark.png" : "/dislike-light.png"}
+                            alt="Dislike"
+                            width={18}
+                            height={18}
+                          />
+                        </button>
+                      </div>
+                    )}
+                    
+                    {!isUser && !message.isStreaming && (
+                      <div
+                        className={`mt-4 mb-6 h-[0.5px] w-[86%] mx-auto ${
+                          isDark ? "bg-white/10" : "bg-[#D7DFFF]"
+                        }`}
+                      />
+                    )}
+                  </React.Fragment>
+                )
+              })
+            )}
             <div ref={messagesEndRef} />
           </div>
 
@@ -441,12 +568,23 @@ export default function ChatPage() {
   )
 }
 
-const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean }) => {
+// ============ Components ============
+
+const MessageBubble = ({ 
+  message, 
+  isDark,
+  isStreaming 
+}: { 
+  message: Message
+  isDark: boolean
+  isStreaming?: boolean
+}) => {
   const isUser = message.role === "user"
+
   return (
     <div className={`flex gap-4 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
-        <div className="flex h-12 w-12 items-center justify-center rounded-full ">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full">
           <Image
             src="/AiLaw.png"
             alt="Model Icon"
@@ -456,7 +594,7 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
           />
         </div>
       )}
-      <div 
+      <div
         className={`max-w-[90%] md:max-w-[90%] rounded-2xl px-5 py-3 ${
           isUser
             ? isDark
@@ -467,12 +605,15 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
               : "text-slate-900"
         }`}
       >
-        <p className="text-pretty leading-relaxed whitespace-pre-wrap ">{message.content}</p>
+        <p className="text-pretty leading-relaxed whitespace-pre-wrap">
+          {message.content}
+          {isStreaming && (
+            <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
+          )}
+        </p>
       </div>
       {isUser && (
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-full`}
-        >
+        <div className="flex h-10 w-10 items-center justify-center rounded-full">
           <Image
             src="/user-profile.svg"
             alt="User Icon"
@@ -485,32 +626,3 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
     </div>
   )
 }
-
-const TypingIndicator = ({ isDark }: { isDark: boolean }) => (
-  <div className="flex gap-4 justify-start">
-    <div className="flex h-12 w-12 items-center justify-center rounded-full">
-      <Image
-            src="/AiLaw.png"
-            alt="Model Icon"
-            width={48}
-            height={48}
-            className="rounded-full"
-          />
-    </div>
-    <div
-      className={`max-w-[85%] md:max-w-2xl rounded-2xl px-5 py-3 ${
-        isDark ? "text-slate-100" : "text-slate-900"
-      }`}
-    >
-      <div className="flex gap-1">
-        <span className="animate-bounce">●</span>
-        <span className="animate-bounce" style={{ animationDelay: "0.1s" }}>
-          ●
-        </span>
-        <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>
-          ●
-        </span>
-      </div>
-    </div>
-  </div>
-)

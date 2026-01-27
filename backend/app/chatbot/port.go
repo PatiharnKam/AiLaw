@@ -1,10 +1,11 @@
-package service
+package chatbot
 
 import "context"
 
 type Service interface {
 	CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (CreateChatSessionResponse, error)
 	ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (*GetMessageResponse, error)
+	ChatbotProcessWithStream(ctx context.Context, req ChatbotProcessRequest, onChunk StreamCallback) (*StreamingMessageResponse, error)
 }
 
 type Storage interface {
@@ -69,4 +70,46 @@ type ChatbotResponse struct {
 type Memory struct {
 	Agent    string `json:"agent"`
 	Sections string `json:"sections"`
+}
+
+// StreamCallback is called for each chunk
+type StreamCallback func(chunk StreamEvent)
+
+// StreamEvent represents different event types from SSE
+type StreamEvent struct {
+	Type string `json:"type"`
+
+	// For content chunks
+	Text string `json:"text,omitempty"`
+
+	// For status updates
+	Message string `json:"message,omitempty"`
+
+	// For COT plan
+	Steps     []string `json:"steps,omitempty"`
+	Rationale string   `json:"rationale,omitempty"`
+
+	// For COT step progress
+	Step        int    `json:"step,omitempty"`
+	Total       int    `json:"total,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// For completion
+	InputTokens  int    `json:"input_tokens,omitempty"`
+	OutputTokens int    `json:"output_tokens,omitempty"`
+	TotalTokens  int    `json:"total_tokens,omitempty"`
+	FullContent  string `json:"full_content,omitempty"`
+
+	// For errors
+	Error string `json:"error,omitempty"`
+}
+
+// StreamingMessageResponse for streaming completion
+type StreamingMessageResponse struct {
+	Message        string `json:"message"`
+	ModelMessageID string `json:"modelMessageId"`
+	InputTokens    int    `json:"inputTokens"`
+	OutputTokens   int    `json:"outputTokens"`
+	TotalTokens    int    `json:"totalTokens"`
+	Remaining      int64  `json:"remaining"`
 }

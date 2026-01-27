@@ -96,29 +96,23 @@ def check_prompt_attack(score: str, threshold: float = 0.9):
         return False, json.dumps({"decision": "not allowed", "message":"Layer 2 : Error: Could not parse score."})
     
 async def get_guard_classification(client, model_name: str, text: str):
-    response =  await client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model_name,
-        messages=[
-            {
-                "role": "user",
-                "content": text
-            }
-        ]
+        messages=[{"role": "user", "content": text}]
     )
     return response.choices[0].message.content
 
-async def chunked_safety_scan(client, 
-                        model_name: str, 
-                        long_text: str):
+async def chunked_safety_scan(client, model_name: str, long_text: str):
     CHUNK_CHARS = 800  
     OVERLAP_CHARS = 300
 
     # Condition 1 : if prompt < chunk size
     if len(long_text) <= CHUNK_CHARS:
         print(f"Prompt length : {len(long_text)} -> Not Chunking... ")
-        score_output = await get_guard_classification(client=client,
-                                              model_name=model_name,
-                                              text=long_text)
+        score_output = await get_guard_classification(
+            client=client,
+            model_name=model_name,
+            text=long_text)
         return check_prompt_attack(score=score_output)
     else:
       # Condition 2 : if prompt > chunk size
@@ -129,9 +123,11 @@ async def chunked_safety_scan(client,
         chunk_text = long_text[i : i + CHUNK_CHARS]
         # print(chunk_text)
 
-        score_output = await get_guard_classification(client=client,
-                                            model_name=model_name,
-                                            text=chunk_text)
+        score_output = await get_guard_classification(
+            client=client,
+            model_name=model_name,
+            text=chunk_text
+        )
         # print(f"   - Checking chars {i}-{i+len(chunk_text)}: {score_output}")
         is_safe, result_msg = check_prompt_attack(score=score_output)
 
