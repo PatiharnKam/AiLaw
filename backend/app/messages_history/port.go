@@ -22,7 +22,7 @@ type MessageHistoryResponse struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"createdAt"`
-	Feedback  *string   `json:"feedback"`
+	Feedback  *int   `json:"feedback"`
 }
 
 type MessageHistoryData struct {
@@ -31,5 +31,5 @@ type MessageHistoryData struct {
 	Role      string    `db:"role"`
 	Content   string    `db:"content"`
 	CreatedAt time.Time `db:"created_at"`
-	Feedback  *string   `db:"feedback"`
+	Feedback  *int   `db:"feedback"`
 }

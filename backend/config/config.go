@@ -21,11 +21,13 @@ func InitConfig() (*Config, error) {
 
 type Config struct {
 	Server   Server
-	HTTP     HTTP
-	APIkey   APIkey
+	Model    Model
 	JWT      JWT
 	Google   Google
 	Database Database `envPrefix:"POSTGRES_"`
+	Redis    Redis    `envPrefix:"REDIS_"`
+	Quota    Quota    `envPrefix:"QUOTA_"`
+	AllowedOrigin []string `env:"ALLOWED_ORIGIN" envSeparator:","`
 }
 
 type JWT struct {
@@ -44,15 +46,12 @@ type Server struct {
 	Port     string `env:"PORT,notEmpty"`
 }
 
-type HTTP struct {
-	URL  string `env:"URL"`
-	Path string `env:"PATH"`
-}
-
-type APIkey struct {
-	GeminiAPIkey string `env:"GEMINI_API_KEY"`
-	ModelAPIkey  string `env:"MODEL_API_KEY"`
-	ModelURL     string `env:"MODEL_URL"`
+type Model struct {
+	ModelAPIkey       string `env:"MODEL_API_KEY"`
+	ModelURL          string `env:"MODEL_URL"`
+	ModelCOTURL       string `env:"MODEL_COT_URL"`
+	ModelStreamURL    string `env:"MODEL_STREAM_URL"`
+	ModelCOTStreamURL string `env:"MODEL_COT_STREAM_URL"`
 }
 
 type Database struct {
@@ -61,4 +60,17 @@ type Database struct {
 	PostgresConnMaxIdleTime   int    `env:"CONNMAXIDIETIME"`
 	PostgresMaxOpenConns      int    `env:"MAXOPENCONNS"`
 	PostgresHealthCheckPeriod int    `env:"HEALTHCHECKPERIOD"`
+}
+
+type Redis struct {
+	Host     string `env:"HOST"`
+	Port     string `env:"PORT"`
+	Password string `env:"PASSWORD"`
+	DB       int    `env:"DB"`
+	URL      string `env:"URL"`
+}
+
+type Quota struct {
+	DailyLimit      int64 `env:"DAILY_LIMIT"`
+	MaxPromptTokens int   `env:"MAX_PROMPT_TOKENS"`
 }

@@ -4,7 +4,13 @@ import React from "react"
 import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { useModelType } from "@/hooks/useModelType"
+import { useWebSocket, WSResponse } from "@/hooks/useWebSocket"
+import { useToast } from "@/hooks/useToast"
+import { ToastContainer } from "@/components/toast"
+import { parseApiError, parseWSError } from "@/utils/errorMapping"
 import { SharedSidebar } from "@/components/shared-sidebar"
+import { ChatInput } from "@/components/chat-input"
 import { usePrompt } from "@/components/prompt-context"
 import { useAuth } from "../../providers"
 
@@ -13,12 +19,13 @@ interface Message {
   role: "user" | "model"
   content: string
   createdAt: string
-  feedback: string | null
+  feedback: number | null
+  isStreaming?: boolean
+  statusMessage?: string
 }
 
 interface Chat {
   sessionId: string
-  title: string
   messages: Message[]
 }
 
@@ -34,18 +41,133 @@ export default function ChatPage() {
   const [isDark, setIsDark] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isSending, setIsSending] = useState(false)
+  const { modelType, setModelType } = useModelType()
   const { accessToken, logout, refreshToken, getToken } = useAuth()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { prompt, setPrompt } = usePrompt()
   const initializedRef = useRef(false)
   const isRefreshingRef = useRef(false)
+  const previousMessageCountRef = useRef(0)
+  const streamingMessageIdRef = useRef<string | null>(null)
+  const { toasts, removeToast, showError } = useToast()
+  const pendingMessageRef = useRef<string>("")
 
+  // ============ WebSocket Setup ============
+  const handleChunk = useCallback((content: string, sessionId: string) => {
+    setChat(prev => {
+      if (!prev) return prev
+
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            content: m.content + content,
+            statusMessage: undefined,
+          }
+        }
+        return m
+      })
+
+      return { ...prev, messages }
+    })
+  }, [])
+
+  const handleStatus = useCallback((status: string) => {
+    console.log("📊 Status:", status)
+    
+    setChat(prev => {
+      if (!prev) return prev
+
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            statusMessage: status,  //status message
+          }
+        }
+        return m
+      })
+
+      return { ...prev, messages }
+    })
+  }, [])
+
+  const handleDone = useCallback((response: WSResponse) => {
+    setChat(prev => {
+      if (!prev) return prev
+
+      const streamingMsg = prev.messages.find(m => m.isStreaming)
+      if (!streamingMsg) {
+        return prev
+      }
+
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            messageId: response.modelMessageId || m.messageId,
+            isStreaming: false,
+            statusMessage: undefined,
+          }
+        }
+        return m
+      })
+
+      return { ...prev, messages }
+    })
+
+    streamingMessageIdRef.current = null
+    pendingMessageRef.current = ""
+    setIsSending(false)
+  }, [])
+
+  const handleError = useCallback((error: string | any) => {
+    const errorInfo = parseWSError(error)
+    showError(errorInfo.title, errorInfo.message)
+    
+    const messageToRestore = pendingMessageRef.current
+    if (messageToRestore) {
+      setInput(messageToRestore)
+      pendingMessageRef.current = ""
+    }
+    
+    setChat(prev => {
+      if (!prev) return prev
+      const messagesWithoutError = prev.messages.filter(m => !m.isStreaming)
+      
+      if (messagesWithoutError.length > 0) {
+        const lastMessage = messagesWithoutError[messagesWithoutError.length - 1]
+        if (lastMessage.role === "user") {
+          return {
+            ...prev,
+            messages: messagesWithoutError.slice(0, -1)
+          }
+        }
+      }
+      
+      return {
+        ...prev,
+        messages: messagesWithoutError
+      }
+    })
+    
+    streamingMessageIdRef.current = null
+    setIsSending(false)
+  }, [showError])
+
+  const { isConnected, sendChat } = useWebSocket(accessToken, {
+    onChunk: handleChunk,
+    onDone: handleDone,
+    onError: handleError,
+    onStatus: handleStatus,
+  })
+
+  // ============ Initialization ============
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
 
     const initialize = async () => {
-      // รอ token ถ้ายังไม่มี
       if (!accessToken) {
         const refreshed = await refreshToken()
         if (!refreshed) {
@@ -56,7 +178,6 @@ export default function ChatPage() {
 
       await loadMessages()
 
-      // ถ้ามี initial prompt ให้ส่งทันที
       if (prompt) {
         await sendMessage(String(prompt))
         setPrompt(null)
@@ -66,73 +187,41 @@ export default function ChatPage() {
     initialize()
   }, [])
 
-  // useEffect(() => {
-  //   const initAuth = async () => {
-  //     if (!accessToken) {
-  //       await refreshToken()
-  //       initializedRef.current = false
-  //     }
-  //   }
-  //   initAuth()
-
-  //   if (initializedRef.current) return
-  //   initializedRef.current = true;
-
-  //   (async () => {
-  //     await loadMessages()
-
-  //     if (prompt) {
-  //       await sendMessage(String(prompt))
-  //       setPrompt(null)
-  //     }
-  //   })()
-  // }, [accessToken, chatId])
-
-  // Scroll ลงล่างเมื่อมีข้อความใหม่
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    const currentMessageCount = chat?.messages?.length || 0
+    
+    if (currentMessageCount > previousMessageCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+    
+    previousMessageCountRef.current = currentMessageCount
+  }, [chat?.messages?.length])
+
+  useEffect(() => {
+    const streamingMessage = chat?.messages.find(m => m.isStreaming)
+    
+    if (streamingMessage) {
+      const scrollToBottom = () => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        })
+      }
+      
+      scrollToBottom()
+    }
   }, [chat?.messages])
 
   useEffect(() => {
-
     const savedTheme = localStorage.getItem("chatbot-theme")
     if (savedTheme) setIsDark(savedTheme === "dark")
 
     const handleResize = () => setSidebarOpen(window.innerWidth >= 768)
     handleResize()
-
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  const handleCopy = (content: string) => {
-    navigator.clipboard.writeText(content).then(() => {
-      console.log("Message copied to clipboard!");
-    }).catch((error) => {
-      console.error("Failed to copy message:", error);
-    });
-  };
-
-  const handleLike = (messageId: string) => {
-    console.log(`Liked message with ID: ${messageId}`);
-    // เพิ่มการทำงาน เช่น การอัปเดตสถานะ 'liked' ในฐานข้อมูล หรือ UI
-  };
-
-  const handleDislike = (messageId: string) => {
-    console.log(`Disliked message with ID: ${messageId}`);
-    // เพิ่มการทำงาน เช่น การอัปเดตสถานะ 'disliked' ในฐานข้อมูล หรือ UI
-  };
-
-  // 🔧 ดึงข้อความ model หรือ user แล้วเพิ่มเข้าแชท
-  const appendMessage = useCallback((newMessages: Message[]) => {
-    setChat(prev => ({
-      sessionId: prev?.sessionId ?? chatId,
-      title: prev?.title ?? "New Chat",
-      messages: [...(prev?.messages ?? []), ...newMessages],
-    }))
-  }, [chatId])
-
-  // 🔧 ฟังก์ชัน fetch wrapper รวมการ handle error
+  // ============ API Functions ============
   const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
     if (isRefreshingRef.current) {
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -140,7 +229,6 @@ export default function ChatPage() {
     }
 
     const currentToken = getToken()
-
     const res = await fetch(`${API_BASE_URL}${path}`, {
       credentials: "include",
       headers: {
@@ -154,7 +242,6 @@ export default function ChatPage() {
     const data = await res.json()
 
     if (data?.data?.action === "logout") {
-      console.log("🚪 Logout action received")
       logout()
       throw new Error("Logged out")
     }
@@ -165,7 +252,6 @@ export default function ChatPage() {
         return apiFetch(path, options)
       }
 
-      console.log("🔄 Refresh token needed")
       isRefreshingRef.current = true
       const refreshed = await refreshToken()
       isRefreshingRef.current = false
@@ -173,84 +259,133 @@ export default function ChatPage() {
       if (refreshed) {
         return apiFetch(path, options)
       } else {
-        console.log("❌ Refresh failed, logging out")
         logout()
         throw new Error("Refresh failed")
       }
     }
 
-    if (!res.ok) throw new Error(data.message || "API request failed")
+    if (!res.ok) {
+      throw data
+    }
+    
     return data
-  }, [getToken, refreshToken, logout]) // ✅ เพิ่ม dependencies ครบ
+  }, [getToken, refreshToken, logout])
 
-  // โหลดข้อความใน session เดิม
   const loadMessages = useCallback(async () => {
     try {
       const data = await apiFetch(`/api/messages-history/${chatId}`, { method: "GET" })
       setChat({
         sessionId: chatId,
-        title: data.data[0]?.content?.slice(0, 50) || "New Chat",
         messages: data.data || [],
       })
-    } catch (error) {
-      console.error("Failed to load messages:", error)
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
       router.push("/welcome")
     }
-  }, [apiFetch, chatId, router])
+  }, [apiFetch, chatId, router, showError])
 
-  // 🔧 ส่งข้อความ (ใช้ได้ทั้ง initial prompt และ user input)
-  const sendMessage = useCallback(async (messageContent: string, role: "user" | "model" = "user") => {
-    if (!messageContent.trim()) return
+  // ============ Send Message (WebSocket) ============
+  const sendMessage = useCallback(async (messageContent: string) => {
+    if (!messageContent.trim() || isSending) return
+
+    const tempUserId = crypto.randomUUID()
+    const tempModelId = crypto.randomUUID()
+
+    pendingMessageRef.current = messageContent
 
     const userMessage: Message = {
-      messageId: crypto.randomUUID(),
-      role,
+      messageId: tempUserId,
+      role: "user",
       content: messageContent,
       createdAt: new Date().toISOString(),
       feedback: null,
     }
 
-    appendMessage([userMessage])
-    setIsSending(true)
+    const modelMessage: Message = {
+      messageId: tempModelId,
+      role: "model",
+      content: "",
+      createdAt: new Date().toISOString(),
+      feedback: null,
+      isStreaming: true,
+      statusMessage: "กำลังประมวลผล...",
+    }
 
+    setChat(prev => ({
+      sessionId: prev?.sessionId ?? chatId,
+      messages: [...(prev?.messages ?? []), userMessage, modelMessage],
+    }))
+
+    setIsSending(true)
+    streamingMessageIdRef.current = tempModelId
+
+    const sent = sendChat(chatId, messageContent, modelType)
+
+    if (!sent) {
+      await sendMessageHTTP(messageContent, tempUserId, tempModelId)
+    }
+  }, [chatId, modelType, isSending, sendChat])
+
+  // Fallback HTTP send (if WebSocket fails)
+  const sendMessageHTTP = useCallback(async (
+    messageContent: string,
+    tempUserId: string,
+    tempModelId: string
+  ) => {
     try {
-      // const data = await apiFetch(`/api/message/gemini`, {
-      //   method: "POST",
-      //   body: JSON.stringify({
-      //     sessionId: chatId,
-      //     userMessage: messageContent,
-      //   }),
-      // })
-      const data = await apiFetch(`/api/message/model`, {
+      const data = await apiFetch(`/api/model`, {
         method: "POST",
         body: JSON.stringify({
           sessionId: chatId,
-          input: {
-            messages: [
-              { role: "user", content: messageContent }
-            ]
-          }
+          modelType: modelType,
+          input: { messages: { role: "user", content: messageContent } },
         }),
       })
 
-      const modelMessage: Message = {
-        messageId: crypto.randomUUID(),
-        role: "model",
-        content: data.data?.message || "No response",
-        createdAt: new Date().toISOString(),
-        feedback: null,
-      }
-
-      appendMessage([modelMessage])
-    } catch (error) {
-      console.error("Failed to send message:", error)
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(m => {
+            if (m.messageId === tempModelId) {
+              return {
+                ...m,
+                messageId: data.data.modelMessageID,
+                content: data.data?.message || "No response",
+                isStreaming: false,
+                statusMessage: undefined,
+              }
+            }
+            return m
+          }),
+        }
+      })
+      
+      pendingMessageRef.current = ""
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.filter(
+            m => m.messageId !== tempUserId && m.messageId !== tempModelId
+          ),
+        }
+      })
       setInput(messageContent)
+      pendingMessageRef.current = ""
     } finally {
       setIsSending(false)
+      streamingMessageIdRef.current = null
     }
-  }, [appendMessage, apiFetch, chatId])
+  }, [apiFetch, chatId, modelType, showError])
 
-  // Theme toggle
+  // ============ Event Handlers ============
   const toggleTheme = () => {
     const newTheme = !isDark
     setIsDark(newTheme)
@@ -265,17 +400,109 @@ export default function ChatPage() {
     sendMessage(messageToSend)
   }
 
+  const handleCopy = (content: string) => {
+    navigator.clipboard.writeText(content)
+  }
+
+  const handleLike = useCallback(async (messageId: string) => {
+    const currentMessage = chat?.messages.find(m => m.messageId === messageId)
+    if (!currentMessage) return
+
+    const newFeedback = currentMessage.feedback === 1 ? null : 1
+
+    try {
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: newFeedback }
+              : msg
+          ),
+        }
+      })
+
+      await apiFetch(`/api/feedback/${messageId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ feedback: newFeedback }),
+      })
+      
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: currentMessage.feedback }
+              : msg
+          ),
+        }
+      })
+    }
+  }, [apiFetch, chat?.messages, showError])
+
+  const handleDislike = useCallback(async (messageId: string) => {
+    const currentMessage = chat?.messages.find(m => m.messageId === messageId)
+    if (!currentMessage) return
+
+    const newFeedback = currentMessage.feedback === -1 ? null : -1
+
+    try {
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: newFeedback }
+              : msg
+          ),
+        }
+      })
+
+      await apiFetch(`/api/feedback/${messageId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ feedback: newFeedback }),
+      })
+      
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: currentMessage.feedback }
+              : msg
+          ),
+        }
+      })
+    }
+  }, [apiFetch, chat?.messages, showError])
+
   if (!chat) return null
 
   return (
     <div className={isDark ? "dark" : ""}>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+      
       <div
-        className={`flex h-screen transition-all duration-300 ${!sidebarOpen ? 'bg-center' : 'bg-[center_right_-130px]'} ${isDark ? "bg-cover bg-[url('/dark-bg.png')] text-white" : "bg-cover bg-[url('/light-bg.png')] text-slate-900"}`}
-        // className={`flex h-screen ${
-        //   isDark ? "bg-[#1E1E1E] text-white" : "bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 text-slate-900"
-        // }`}
+        className={`flex h-screen transition-all duration-300 ${
+          !sidebarOpen ? "bg-center" : "bg-[center_right_-130px]"
+        } ${
+          isDark
+            ? "bg-cover bg-[url('/dark-bg.png')] text-white"
+            : "bg-cover bg-[url('/light-bg.png')] text-slate-900"
+        }`}
       >
-        {/* Sidebar */}
         <SharedSidebar
           isDark={isDark}
           onToggleTheme={toggleTheme}
@@ -289,8 +516,8 @@ export default function ChatPage() {
             onClick={() => setSidebarOpen(true)}
             className={`fixed top-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
               isDark
-                ? "bg-slate-800 text-white hover:bg-slate-700"
-                : "bg-white text-slate-900 hover:bg-slate-100 shadow-lg"
+                ? "bg-[#3C3C3C] text-white hover:bg-[#3C3C3C]"
+                : "bg-white text-slate-900 hover:bg-[#C7CDE4] shadow-lg"
             }`}
           >
             <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -301,72 +528,82 @@ export default function ChatPage() {
 
         {/* Main Chat Area */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          {/* <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"> */}
           <div className="custom-scroll flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
             {chat.messages.length === 0 ? (
               <div className={`text-center py-12 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 No messages yet. Start the conversation!
               </div>
             ) : (
-                  chat.messages.map((message) => {
-                    const isUser = message.role === "user";
-                    
-                    return (
-                      <React.Fragment key={message.messageId}>
-                        <MessageBubble message={message} isDark={isDark} />
-                        
-                        {!isUser && (
-                          <div className="flex items-center mt-2 mb-6 w-[86%] mx-auto">
-                            <button 
-                              onClick={() => handleCopy(message.content)} 
-                              className="flex items-center justify-center p-2 cursor-pointer"
-                              aria-label="Copy message"
-                            >
-                              <Image
-                                src={isDark ? "/copy-dark.png" : "/copy-light.png"}
-                                alt="Copy"
-                                width={18}
-                                height={18}
-                              />
-                            </button>
-                            <button 
-                              onClick={() => handleLike(message.messageId)} 
-                              className="flex items-center justify-center p-2 cursor-pointer"
-                              aria-label="Like message"
-                            >
-                              <Image
-                                src={isDark ? "/like-dark.png" : "/like-light.png"}
-                                alt="Like"
-                                width={18}
-                                height={18}
-                              />
-                            </button>
-                            <button 
-                              onClick={() => handleDislike(message.messageId)} 
-                              className="flex items-center justify-center p-2 cursor-pointer"
-                              aria-label="Dislike message"
-                            >
-                              <Image
-                                src={isDark ? "/dislike-dark.png" : "/dislike-light.png"}
-                                alt="Dislike"
-                                width={18}
-                                height={18}
-                              />
-                            </button>
-                          </div>
-                        )}
-                        {!isUser && (
-                          <div
-                            className={`mt-4 mb-6 h-[0.5px] w-[86%] mx-auto ${isDark ? "bg-white/10" : "bg-[#D7DFFF]"}`}
-                          ></div>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
-                )}
+              chat.messages.map((message) => {
+                const isUser = message.role === "user"
 
-            {/* Loading Indicator */}
-            {isSending && <TypingIndicator isDark={isDark} />}
+                return (
+                  <React.Fragment key={message.messageId}>
+                    <MessageBubble 
+                      message={message} 
+                      isDark={isDark}
+                      isStreaming={message.isStreaming}
+                    />
+
+                    {!isUser && !message.isStreaming && (
+                      <div className="flex items-center mt-2 mb-6 w-[86%] mx-auto">
+                        <button
+                          onClick={() => handleCopy(message.content)}
+                          className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                            isDark ? "hover:bg-[#3C3C3C]" : "hover:bg-[#C7CDE4]"
+                          }`}
+                        >
+                          <Image
+                            src={isDark ? "/copy-dark.png" : "/copy-light.png"}
+                            alt="Copy"
+                            width={18}
+                            height={18}
+                          />
+                        </button>
+                        <button
+                          onClick={() => handleLike(message.messageId)}
+                          className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                            message.feedback === 1
+                              ? isDark ? "bg-[#3C3C3C]" : "bg-[#C7CDE4]"
+                              : isDark ? "hover:bg-[#3C3C3C]" : "hover:bg-[#C7CDE4]"
+                          }`}
+                        >
+                          <Image
+                            src={isDark ? "/like-dark.png" : "/like-light.png"}
+                            alt="Like"
+                            width={18}
+                            height={18}
+                          />
+                        </button>
+                        <button
+                          onClick={() => handleDislike(message.messageId)}
+                          className={`flex items-center justify-center p-2 cursor-pointer rounded-lg ${
+                            message.feedback === -1
+                              ? isDark ? "bg-[#3C3C3C]" : "bg-[#C7CDE4]"
+                              : isDark ? "hover:bg-[#3C3C3C]" : "hover:bg-[#C7CDE4]"
+                          }`}
+                        >
+                          <Image
+                            src={isDark ? "/dislike-dark.png" : "/dislike-light.png"}
+                            alt="Dislike"
+                            width={18}
+                            height={18}
+                          />
+                        </button>
+                      </div>
+                    )}
+                    
+                    {!isUser && !message.isStreaming && (
+                      <div
+                        className={`mt-4 mb-6 h-[0.5px] w-[86%] mx-auto ${
+                          isDark ? "bg-white/10" : "bg-[#D7DFFF]"
+                        }`}
+                      />
+                    )}
+                  </React.Fragment>
+                )
+              })
+            )}
             <div ref={messagesEndRef} />
           </div>
 
@@ -377,6 +614,8 @@ export default function ChatPage() {
             handleSubmit={handleSubmit}
             isSending={isSending}
             isDark={isDark}
+            modelType={modelType}
+            setModelType={setModelType}
           />
         </main>
       </div>
@@ -384,13 +623,23 @@ export default function ChatPage() {
   )
 }
 
-const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean }) => {
+// ============ Components ============
+
+const MessageBubble = ({ 
+  message, 
+  isDark,
+  isStreaming 
+}: { 
+  message: Message
+  isDark: boolean
+  isStreaming?: boolean
+}) => {
   const isUser = message.role === "user"
+
   return (
     <div className={`flex gap-4 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
-        // <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full ">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full">
           <Image
             src="/AiLaw.png"
             alt="Model Icon"
@@ -400,31 +649,43 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
           />
         </div>
       )}
-      <div 
+      <div
         className={`max-w-[90%] md:max-w-[90%] rounded-2xl px-5 py-3 ${
-        // className={`max-w-[85%] md:max-w-2xl rounded-2xl px-5 py-3 ${
           isUser
             ? isDark
               ? "bg-white/10 text-white"
               : "bg-[#4557A1] text-white"
-              // : "bg-[#E8EAF3] text-slate-900"
             : isDark
               ? "text-slate-100"
               : "text-slate-900"
-            // ? isDark
-            //   ? "bg-[#3C3C3C] text-white"
-            //   : "bg-white/80 text-slate-900"
-            // : isDark
-            //   ? "bg-[#3C3C3C] text-slate-100"
-            //   : "bg-white/80 backdrop-blur-sm text-slate-900 shadow-sm"
         }`}
       >
-        <p className="text-pretty leading-relaxed whitespace-pre-wrap ">{message.content}</p>
+        {isStreaming && message.statusMessage && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex space-x-1">
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-slate-300" : "bg-slate-600"}`} style={{ animationDelay: "0ms" }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-slate-300" : "bg-slate-600"}`} style={{ animationDelay: "150ms" }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-slate-300" : "bg-slate-600"}`} style={{ animationDelay: "300ms" }} />
+            </div>
+            <span className={`text-sm italic ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              {message.statusMessage}
+            </span>
+          </div>
+        )}
+
+        <p className="text-pretty leading-relaxed whitespace-pre-wrap">
+          {message.content || (isStreaming && !message.statusMessage && (
+            <span className={`text-sm italic ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              กำลังประมวลผล...
+            </span>
+          ))}
+          {isStreaming && message.content && (
+            <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
+          )}
+        </p>
       </div>
       {isUser && (
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-full`}
-        >
+        <div className="flex h-10 w-10 items-center justify-center rounded-full">
           <Image
             src="/user-profile.svg"
             alt="User Icon"
@@ -437,97 +698,3 @@ const MessageBubble = ({ message, isDark }: { message: Message; isDark: boolean 
     </div>
   )
 }
-
-const TypingIndicator = ({ isDark }: { isDark: boolean }) => (
-  <div className="flex gap-4 justify-start">
-    <div className="flex h-12 w-12 items-center justify-center rounded-full">
-      <Image
-            src="/AiLaw.png"
-            alt="Model Icon"
-            width={48}
-            height={48}
-            className="rounded-full"
-          />
-    </div>
-    <div
-      className={`max-w-[85%] md:max-w-2xl rounded-2xl px-5 py-3 ${
-        // isDark ? "bg-slate-800 text-slate-100" : "bg-white/80 backdrop-blur-sm text-slate-900 shadow-sm"
-        isDark ? "text-slate-100" : "text-slate-900"
-      }`}
-    >
-      <div className="flex gap-1">
-        <span className="animate-bounce">●</span>
-        <span className="animate-bounce" style={{ animationDelay: "0.1s" }}>
-          ●
-        </span>
-        <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>
-          ●
-        </span>
-      </div>
-    </div>
-  </div>
-)
-
-const ChatInput = ({
-  input,
-  setInput,
-  handleSubmit,
-  isSending,
-  isDark,
-}: {
-  input: string
-  setInput: React.Dispatch<React.SetStateAction<string>>
-  handleSubmit: (e: React.FormEvent) => void
-  isSending: boolean
-  isDark: boolean
-}) => (
-  <div className={`p-4`}>
-    <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
-      <div className="relative">
-        <textarea
-          ref={(el) => {
-            if (el) {
-              el.style.height = 'auto';
-              el.style.height = el.scrollHeight + 'px';
-            }
-          }}
-          value={input}
-          onChange={(e) => {
-            setInput(e.target.value);
-            e.target.style.height = 'auto';
-            e.target.style.height = e.target.scrollHeight + 'px';
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-          disabled={isSending}
-          placeholder={isSending ? "Sending..." : "Type your message..."}
-          rows={1}
-          className={`w-full rounded-3xl px-6 py-3 pr-14 resize-none overflow-hidden focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed max-h-[200px] ${
-            isDark
-              ? "border border-[#EFF4FF]/30 bg-[#FFFFFF]/5 text-white placeholder-[#EFF4FF]/30 focus:border-[#EFF4FF]/30 focus:ring-[#EFF4FF]/20"
-              : "border-2 border-slate-200 bg-white text-slate-900 placeholder-slate-400 focus:border-[#D7DFFF] focus:ring-[indigo-500/20] shadow-sm"
-          }`}
-        ></textarea>
-        <button
-          type="submit"
-          disabled={!input.trim() || isSending}
-          className={`absolute right-2 bottom-3 flex h-9 w-9 items-center justify-center rounded-3xl text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-            isDark ? "bg-[#F3F3F3]" : "bg-[#485BA9]"
-          }`}
-        >
-          <Image
-            src="/send-logo.svg"
-            width={24}
-            height={24}
-            alt="icon"
-            className={isDark ? "" : "invert"}
-          />
-        </button>
-      </div>
-    </form>
-  </div>
-)

@@ -4,7 +4,12 @@ import type React from "react"
 import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { useModelType } from "@/hooks/useModelType"
+import { useToast } from "@/hooks/useToast"
+import { ToastContainer } from "@/components/toast"
+import { parseApiError } from "@/utils/errorMapping"
 import { SharedSidebar } from "@/components/shared-sidebar"
+import { ChatInput } from "@/components/chat-input"
 import { useAuth } from "../providers"
 import { usePrompt } from "../../components/prompt-context"
 
@@ -15,12 +20,13 @@ export default function WelcomePage() {
   const [prompt, setUserPrompt] = useState("")
   const [isDark, setIsDark] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const { modelType, setModelType } = useModelType()
   const { accessToken, logout, refreshToken, getToken } = useAuth()
   const { setPrompt } = usePrompt()
   const initializedRef = useRef(false)
   const isRefreshingRef = useRef(false)
+  const { toasts, removeToast, showError } = useToast()
 
-  // ✅ 1. useEffect สำหรับ Theme & Sidebar (แยกออกมา)
   useEffect(() => {
     const savedTheme = localStorage.getItem("chatbot-theme")
     if (savedTheme) {
@@ -37,7 +43,6 @@ export default function WelcomePage() {
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  // ✅ 2. useEffect สำหรับ Auth (รันครั้งเดียว)
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -52,9 +57,8 @@ export default function WelcomePage() {
     }
 
     initAuth()
-  }, []) // ✅ Empty dependency เพราะใช้ ref ควบคุม
+  }, [])
 
-  // ✅ 3. ฟังก์ชัน apiFetch สำหรับ handle error
   const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
     if (isRefreshingRef.current) {
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -98,7 +102,10 @@ export default function WelcomePage() {
       }
     }
 
-    if (!res.ok) throw new Error(data.message || "API request failed")
+    if (!res.ok) {
+      throw data
+    }
+    
     return data
   }, [getToken, refreshToken, logout])
 
@@ -108,14 +115,13 @@ export default function WelcomePage() {
     localStorage.setItem("chatbot-theme", newTheme ? "dark" : "light")
   }
 
-  // ✅ 4. handleSubmit ใช้ apiFetch
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!prompt.trim()) return
 
     try {
       const chatTitle = prompt.slice(0, 50)
-      const data = await apiFetch("/api/create-session", {
+      const data = await apiFetch("/api/session", {
         method: "POST",
         body: JSON.stringify({ title: chatTitle }),
       })
@@ -123,13 +129,18 @@ export default function WelcomePage() {
       const chatId = data.data
       setPrompt(prompt)
       router.push(`/chat/${chatId}`)
-    } catch (error) {
-      console.error("Create session error:", error)
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      router.push("/welcome")
     }
   }
 
   return (
     <div className={isDark ? "dark" : ""}>
+      {/* 🎯 Toast Container */}
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+      
       <div
         className={`flex min-h-screen transition-all duration-300 ${
           !sidebarOpen ? 'bg-center' : 'bg-[center_right_-130px]'
@@ -227,50 +238,15 @@ export default function WelcomePage() {
             </div>
 
             <div className="pt-[30px]">
-              <form onSubmit={handleSubmit} className="relative">
-                <textarea
-                  ref={(el) => {
-                    if (el) {
-                      el.style.height = 'auto'
-                      el.style.height = el.scrollHeight + 'px'
-                    }
-                  }}
-                  value={prompt}
-                  onChange={(e) => {
-                    setUserPrompt(e.target.value)
-                    e.target.style.height = 'auto'
-                    e.target.style.height = e.target.scrollHeight + 'px'
-                  }}
-                  placeholder="Type your message here..."
-                  rows={1}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSubmit(e)
-                    }
-                  }}
-                  className={`w-full rounded-3xl px-6 py-4 pr-14 resize-none overflow-hidden focus:outline-none focus:ring-2 max-h-[200px] ${
-                    isDark 
-                      ? "border border-[#EFF4FF]/30 bg-[#FFFFFF]/5 text-white placeholder-[#EFF4FF]/30 focus:border-[#EFF4FF]/30 focus:ring-[#EFF4FF]/20" 
-                      : "border-2 border-slate-200 bg-white/80 backdrop-blur-sm text-slate-900 placeholder-slate-400 focus:border-[#D7DFFF] focus:ring-[indigo-500/20] shadow-sm"
-                  }`}
-                />
-                <button
-                  type="submit"
-                  disabled={!prompt.trim()}
-                  className={`absolute right-2 bottom-3.5 flex h-10 w-10 items-center justify-center rounded-3xl text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isDark ? "bg-[#F3F3F3]" : "bg-[#485BA9]"
-                  }`}
-                >
-                  <Image
-                    src="/send-logo.svg"
-                    width={24}
-                    height={24}
-                    alt="icon"
-                    className={isDark ? "" : "invert"}
-                  />
-                </button>
-              </form>
+              <ChatInput
+                input={prompt}
+                setInput={setUserPrompt}
+                handleSubmit={handleSubmit}
+                isDark={isDark}
+                modelType={modelType}
+                setModelType={setModelType}
+                placeholder="Type your message here..."
+              />
             </div>
           </div>
         </main>

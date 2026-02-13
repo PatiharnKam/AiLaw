@@ -1,4 +1,4 @@
-package service
+package chatbot
 
 import (
 	"context"
@@ -60,16 +60,18 @@ func (s *storage) UpdateLastMessageAt(ctx context.Context, userId string, sessio
 	return nil
 }
 
-func (s *storage) SaveUserMessage(ctx context.Context, sessionId, userMessage string) error {
-	query := `INSERT INTO chat_messages 
-				(message_id, session_id, role ,content, created_at)
-			VALUES ($1, $2, $3, $4, $5)`
+func (s *storage) SaveUserMessage(ctx context.Context, userId, sessionId, modelMessageId, userMessage string, userPromptTokens int) error {
+	query := `INSERT INTO user_messages 
+				(message_id, user_id, session_id ,content, created_at, user_prompt_tokens, model_answer_message_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := s.db.Exec(ctx, query,
 		uuid.NewString(),
+		userId,
 		sessionId,
-		"user",
 		userMessage,
 		time.Now(),
+		userPromptTokens,
+		modelMessageId,
 	)
 	if err != nil {
 		return fmt.Errorf("error when insert data: %v", err)
@@ -77,23 +79,23 @@ func (s *storage) SaveUserMessage(ctx context.Context, sessionId, userMessage st
 	return nil
 }
 
-func (s *storage) SaveModelMessage(ctx context.Context, sessionId string, modelDetail ModelMessageDetail) error {
-	query := `INSERT INTO chat_messages 
-			(message_id, session_id, role ,content, created_at , feedback,
-			prompt_tokens, completion_tokens, total_tokens, estimate_tokens, response_time)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-
+func (s *storage) SaveModelMessage(ctx context.Context, userId, sessionId, modelMessageId string, modelDetail ModelMessageDetail) error {
+	query := `INSERT INTO model_messages 
+			(message_id, user_id, session_id, model_type ,content, created_at , feedback,
+			total_input_tokens, total_output_tokens, final_output_tokens, total_used_tokens, response_time)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 	_, err := s.db.Exec(ctx, query,
-		uuid.NewString(),
+		modelMessageId,
+		userId,
 		sessionId,
-		"model",
+		modelDetail.ModelType,
 		modelDetail.Content,
 		time.Now(),
 		modelDetail.Feedback,
-		modelDetail.PromptTokens,
-		modelDetail.CompletionTokens,
-		modelDetail.TotalTokens,
-		modelDetail.EstimateTokens,
+		modelDetail.TotalInputTokens,
+		modelDetail.TotalOutputTokens,
+		modelDetail.FinalOutputTokens,
+		modelDetail.TotalUsedTokens,
 		modelDetail.ResponseTime,
 	)
 	if err != nil {

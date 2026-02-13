@@ -19,12 +19,25 @@ func (s *Storage) GetMessageHistoryStorage(ctx context.Context, sessionId string
 		SELECT 
 			session_id,
 			message_id,
-			role,
+			'user' AS role,
+			content,
+			created_at,
+			NULL AS feedback
+		FROM user_messages
+		WHERE session_id = $1
+
+		UNION ALL
+
+		SELECT 
+			session_id,
+			message_id,
+			'model' AS role,
 			content,
 			created_at,
 			feedback
-		FROM chat_messages
+		FROM model_messages
 		WHERE session_id = $1
+
 		ORDER BY created_at ASC;
 	`
 
@@ -34,7 +47,7 @@ func (s *Storage) GetMessageHistoryStorage(ctx context.Context, sessionId string
 	}
 	defer rows.Close()
 
-	dataList := []MessageHistoryData{}
+	var dataList []MessageHistoryData
 
 	for rows.Next() {
 		var data MessageHistoryData

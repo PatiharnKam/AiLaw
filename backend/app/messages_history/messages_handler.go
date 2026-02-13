@@ -25,7 +25,7 @@ func (h *Handler) GetMessageHistory(c *gin.Context) {
 	logger := slog.Default()
 	var req MessageHistoryRequest
 
-	req.SessionId = c.Param("sessionId")
+	req.SessionId = c.Param("sessionID")
 
 	if err := h.validator.Struct(req); err != nil {
 		logger.Error("invalid request body : " + err.Error())

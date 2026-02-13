@@ -1,4 +1,4 @@
-package service
+package chatbot
 
 import (
 	"bytes"
@@ -8,123 +8,133 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 
+	"github.com/PatiharnKam/AiLaw/app"
+	"github.com/PatiharnKam/AiLaw/app/quota"
 	"github.com/PatiharnKam/AiLaw/config"
-	"github.com/google/generative-ai-go/genai"
+	"github.com/google/uuid"
 )
 
 type MessageService struct {
-	cfg     *config.Config
-	storage Storage
-	client  *genai.Client
-	model   *genai.GenerativeModel
+	cfg          *config.Config
+	storage      Storage
+	quotaService quota.QuotaService
+	httpClient   *http.Client
 }
 
-func NewService(cfg *config.Config, storage Storage, client *genai.Client, model *genai.GenerativeModel) *MessageService {
+func NewService(cfg *config.Config, storage Storage, quotaService quota.QuotaService) *MessageService {
 	return &MessageService{
-		cfg:     cfg,
-		storage: storage,
-		client:  client,
-		model:   model,
+		cfg:          cfg,
+		storage:      storage,
+		quotaService: quotaService,
+		httpClient:   &http.Client{Timeout: 0},
 	}
 
 }
 
-func (s *MessageService) CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (CreateChatSessionResponse, error) {
+func (s *MessageService) CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (*CreateChatSessionResponse, error) {
 	resp, err := s.storage.CreateSession(ctx, req)
 	if err != nil {
-		return CreateChatSessionResponse{}, fmt.Errorf("error when create session : %w", err)
+		return nil, fmt.Errorf("error when create session : %w", err)
 	}
-	return *resp, nil
+	return resp, nil
 }
 
-func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (*GetMessageResponse, error) {
-	fmt.Println("start update last message")
-	err := s.storage.UpdateLastMessageAt(ctx, req.UserId, req.SessionId)
+func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (app.Response, error) {
+	userPromptTokens, err := s.quotaService.CheckPromptLength(req.Input.Messages.Content)
 	if err != nil {
-		return nil, fmt.Errorf("error when update last message at session : %w", err)
+		return app.Response{
+			Code:    app.UserPromptLengthExceededErrorCode,
+			Message: app.UserPromptLengthExceededErrorMessage,
+		}, fmt.Errorf("prompt length exceeded: %w", err)
 	}
 
-	prompt := genai.Text(req.UserMessage)
-
-	// เรียก Gemini API
-	resp, err := s.model.GenerateContent(ctx, prompt)
+	quotaStatus, err := s.quotaService.CheckQuota(ctx, req.UserId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate content: %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("failed to check quota: %w", err)
 	}
 
-	// ดึง response text
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("no response generated")
+	fmt.Println()
+	slog.Info("quota status", "status", quotaStatus)
+
+	if quotaStatus.IsExceeded {
+		return app.Response{
+			Code:    app.QuotaExceededErrorCode,
+			Message: app.QuotaExceededErrorMessage,
+		}, fmt.Errorf(app.QuotaExceededErrorMessage)
 	}
 
-	fmt.Println("start save user message")
-	err = s.storage.SaveUserMessage(ctx, req.SessionId, req.UserMessage)
+	err = s.storage.UpdateLastMessageAt(ctx, req.UserId, req.SessionId)
 	if err != nil {
-		return nil, fmt.Errorf("error when save user message at session : %w", err)
-	}
-
-	// แปลง response เป็น string
-	responseText := ""
-	for _, part := range resp.Candidates[0].Content.Parts {
-		responseText += fmt.Sprintf("%v", part)
-	}
-
-	modelmessageDetail := ModelMessageDetail{
-		Content: responseText,
-	}
-
-	fmt.Println("start save model message")
-	err = s.storage.SaveModelMessage(ctx, req.SessionId, modelmessageDetail)
-	if err != nil {
-		return nil, fmt.Errorf("error when save model message at session : %w", err)
-	}
-
-	return &GetMessageResponse{Message: responseText}, nil
-}
-func (s *MessageService) ChatbotModelProcess(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageResponse, error) {
-	err := s.storage.UpdateLastMessageAt(ctx, req.UserId, req.SessionId)
-	if err != nil {
-		return nil, fmt.Errorf("error when update last message at session : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error when update last message at session : %w", err)
 	}
 
 	resp, err := s.callChatbot(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed when call chatbot : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("failed when call chatbot : %w", err)
 	}
 
-	err = s.storage.SaveUserMessage(ctx, req.SessionId, req.Input.Message[0].Content)
+	modelMessageId := uuid.NewString()
+	err = s.storage.SaveUserMessage(ctx, req.UserId, req.SessionId, modelMessageId, req.Input.Messages.Content, userPromptTokens)
 	if err != nil {
-		return nil, fmt.Errorf("error when save user message at session : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error when save user message at session : %w", err)
 	}
 
 	modelmessageDetail := ModelMessageDetail{
-		Content: resp.Output.Content,
+		ModelType:         req.ModelType,
+		Content:           resp.Content,
+		TotalInputTokens:  resp.TotalInputTokens,
+		TotalOutputTokens: resp.TotalOutputTokens,
+		FinalOutputTokens: resp.FinalOutputTokens,
+		TotalUsedTokens:   resp.TotalUsedTokens,
 	}
 
-	if modelmessageDetail.Content == strings.Trim(modelmessageDetail.Content, modelmessageDetail.Content) {
-		modelmessageDetail.Content = "No response"
-	}
-
-	err = s.storage.SaveModelMessage(ctx, req.SessionId, modelmessageDetail)
+	err = s.storage.SaveModelMessage(ctx, req.UserId, req.SessionId, modelMessageId, modelmessageDetail)
 	if err != nil {
-		return nil, fmt.Errorf("error when save model message at session : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error when save model message at session : %w", err)
 	}
 
-	return &GetMessageResponse{Message: modelmessageDetail.Content}, nil
+	err = s.quotaService.ConsumeTokens(ctx, req.UserId, int64(resp.TotalUsedTokens))
+	if err != nil {
+		slog.Error("failed to consume tokens", "error", err)
+	}
+
+	fmt.Println()
+	slog.Info("resp is", "response", resp)
+	fmt.Println()
+
+	return app.Response{
+		Code:    app.SUCCESS_CODE,
+		Message: app.SUCCESS_MSG,
+		Data: GetMessageResponse{
+			Message:        modelmessageDetail.Content,
+			ModelMessageID: modelMessageId,
+		},
+	}, nil
 }
 
-func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessModelRequest) (*GetMessageModelResponse, error) {
-	client := &http.Client{}
+func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessRequest) (*ChatbotResponse, error) {
 
-	data := map[string]interface{}{
-		"input": map[string]interface{}{
-			"messages": []map[string]interface{}{
-				{
-					"role":    req.Input.Message[0].Role,
-					"content": req.Input.Message[0].Content, // Assuming your GetMessageModelRequest has Message field
-				},
+	data := ChatbotRequest{
+		Messages: []Messages{
+			{
+				Role:    req.Input.Messages.Role,
+				Content: req.Input.Messages.Content,
 			},
 		},
 	}
@@ -133,47 +143,38 @@ func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessMode
 	if err != nil {
 		return nil, fmt.Errorf("Error marshaling JSON: %w", err)
 	}
-	buffer := bytes.NewBuffer(jsonData)
 
-	fmt.Println()
-	fmt.Println()
-	slog.Info("buffer is : ", "buffer", buffer)
-	fmt.Println()
-	fmt.Println()
+	modelURL := s.cfg.Model.ModelURL
+	if req.ModelType == "COT" {
+		modelURL = s.cfg.Model.ModelCOTURL
+	}
 
-	reqHttp, err := http.NewRequest("POST", s.cfg.APIkey.ModelURL, buffer)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", modelURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("error when creating API request: %w", err)
 	}
-	reqHttp.Header.Set("Content-Type", "application/json")
-	reqHttp.Header.Set("Authorization", "Bearer "+s.cfg.APIkey.ModelAPIkey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.cfg.Model.ModelAPIkey)
 
-	resp, err := client.Do(reqHttp)
+	httpResp, err := s.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("error whell calling API Model : %w", err)
 	}
-	defer resp.Body.Close()
+	defer httpResp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed with status: %d", httpResp.StatusCode)
 	}
 
-	// Read the response body
-	respBody, err := io.ReadAll(resp.Body)
+	httpRespBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body from model: %w", err)
 	}
 
-	var response GetMessageModelResponse
-	if err := json.Unmarshal(respBody, &response); err != nil {
+	var response ChatbotResponse
+	if err := json.Unmarshal(httpRespBody, &response); err != nil {
 		return nil, fmt.Errorf("error unmarshaling response: %w", err)
 	}
-
-	fmt.Println()
-	fmt.Println()
-	slog.Info("resp is", "response", response)
-	fmt.Println()
-	fmt.Println()
 
 	return &response, nil
 }

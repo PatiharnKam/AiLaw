@@ -20,13 +20,11 @@ type TokenPair struct {
 }
 
 func (s *authService) generateTokenPair(ctx context.Context, userID string) (*TokenPair, error) {
-	// แปลง private key จาก string → *rsa.PrivateKey
 	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(s.cfg.JWT.PrivateKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %v", err)
 	}
 
-	// Access Token (15 นาที)
 	accessClaims := &JWTClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -41,7 +39,6 @@ func (s *authService) generateTokenPair(ctx context.Context, userID string) (*To
 		return nil, err
 	}
 
-	// Refresh Token (30 วัน)
 	refreshClaims := &JWTClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -56,7 +53,6 @@ func (s *authService) generateTokenPair(ctx context.Context, userID string) (*To
 		return nil, err
 	}
 
-	fmt.Println("start save token")
 	expiredAt := time.Now().Add(30 * 24 * time.Hour)
 	err = s.storage.StoreRefreshToken(ctx, userID, refreshTokenString, expiredAt)
 	if err != nil {

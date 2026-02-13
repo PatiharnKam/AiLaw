@@ -1,0 +1,16 @@
+pandas
+python-dotenv
+pinecone
+openai
+langchain
+langchain-community
+langchain-pinecone
+langchain-text-splitters
+runpod==1.7.1
+pdfplumber 
+pdfminer
+
+groq
+fastapi
+pydantic
+uvicorn

@@ -6,7 +6,6 @@ import (
 )
 
 type AuthService interface {
-	GetToken(ctx context.Context) (*TokenPair, error)
 	GetGoogleLoginURL(email string) string
 	HandleGoogleCallback(ctx context.Context, req GoogleCallbackRequest) (*LoginResponse, error)
 	RefreshTokenService(ctx context.Context, refreshToken string) (*RefreshTokenProcessResponse, error)
@@ -47,13 +46,13 @@ type User struct {
 }
 
 type LoginResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
 	UserId       string `json:"userId"`
 }
 
 type RefreshTokenProcessResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
 	UserId       string `json:"userId"`
 }
