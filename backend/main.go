@@ -61,6 +61,10 @@ func main() {
 		HealthCheckPeriod: &cfg.Database.PostgresHealthCheckPeriod,
 	})
 	defer db.Close()
+	if err != nil {
+		slog.Error("Failed to connect to Postgres: %w", err)
+		return
+	}
 
 	redisClient, err := config.NewRedisClient(cfg.Redis)
 	if err != nil {
