@@ -3,7 +3,7 @@
 import React, { createContext, useState, useContext, ReactNode, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 
 interface AuthContextType {
   accessToken: string | null
