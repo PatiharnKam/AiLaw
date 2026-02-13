@@ -34,7 +34,6 @@ class ChatRequest(BaseModel):
 # ---------------------------------------------------------
 # Initialize Agents
 # ---------------------------------------------------------
-print("Loading Agents...")
 
 # Original agents
 guard_agent = GuardAgent()
@@ -42,8 +41,6 @@ detail_agent = DetailsAgent()
 
 # Streaming agents
 detail_agent_streaming = DetailsAgentStreaming()
-
-print("Agents Loaded Successfully!")
 
 # ---------------------------------------------------------
 # API ROUTES
@@ -77,9 +74,10 @@ async def chat_completions(request: ChatRequest):
             "content": detail_response["content"],
             "decision": "processed",
             "memory": detail_response.get("memory", {}),
-            "input_tokens": detail_response.get("input_tokens", {}),
-            "output_tokens": detail_response.get("output_tokens", {}),
-            "total_tokens": detail_response.get("total_tokens", {})
+            "totalInputTokens": detail_response.get("totalInputTokens", {}),
+            "totalOutputTokens": detail_response.get("totalOutputTokens", {}),
+            "finalOutputTokens": detail_response.get("finalOutputTokens", {}),
+            "totalUsedTokens": detail_response.get("totalUsedTokens", {})
         }
 
     except Exception as e:
@@ -105,16 +103,17 @@ async def chat_completions_cot(request: ChatRequest):
         
         # Detail Layer
         user_question = input_messages[-1]['content']
-        detail_response = await detail_agent.get_response(user_question)
+        detail_response = await detail_agent.get_response_COT(user_question)
         
         return {
             "role": "assistant",
             "content": detail_response["content"],
             "decision": "processed",
             "memory": detail_response.get("memory", {}),
-            "input_tokens": detail_response.get("input_tokens", {}),
-            "output_tokens": detail_response.get("output_tokens", {}),
-            "total_tokens": detail_response.get("total_tokens", {})
+            "totalInputTokens": detail_response.get("totalInputTokens", {}),
+            "totalOutputTokens": detail_response.get("totalOutputTokens", {}),
+            "finalOutputTokens": detail_response.get("finalOutputTokens", {}),
+            "totalUsedTokens": detail_response.get("totalUsedTokens", {})
         }
 
     except Exception as e:

@@ -26,7 +26,6 @@ func NewService(cfg *config.Config, storage AuthStorage) *authService {
 	}
 }
 
-// GetGoogleLoginURL - สร้าง URL สำหรับ redirect ไป Google
 func (s *authService) GetGoogleLoginURL(email string) string {
 	baseURL := "https://accounts.google.com/o/oauth2/v2/auth"
 
@@ -38,7 +37,6 @@ func (s *authService) GetGoogleLoginURL(email string) string {
 	params.Add("access_type", "offline")
 	params.Add("prompt", "consent")
 
-	// 🔑 จุดสำคัญ: ถ้ามี email ให้ Google pre-fill
 	if email != "" {
 		params.Add("login_hint", email)
 	}
@@ -46,23 +44,16 @@ func (s *authService) GetGoogleLoginURL(email string) string {
 	return fmt.Sprintf("%s?%s", baseURL, params.Encode())
 }
 
-// HandleGoogleCallback - จัดการหลัง Google redirect กลับมา
 func (s *authService) HandleGoogleCallback(ctx context.Context, req GoogleCallbackRequest) (*LoginResponse, error) {
-	// 1. แลก Authorization Code กับ Access Token จาก Google
 	googleToken, err := s.exchangeGoogleCode(req.Code)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange code: %v", err)
 	}
 
-	// 2. ใช้ Google Access Token ดึงข้อมูล User
 	userInfo, err := s.getGoogleUserInfo(googleToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user info: %v", err)
 	}
-	// userInfo := User{
-	// 	Email: "test@gmail.com",
-	// 	Name: "test name",
-	// }
 
 	user := User{
 		Email:   userInfo.Email,
@@ -70,12 +61,12 @@ func (s *authService) HandleGoogleCallback(ctx context.Context, req GoogleCallba
 		Picture: userInfo.Picture,
 	}
 
-	// 3. เช็คว่ามี User ในระบบไหม
+	now := time.Now()
 	resp, err := s.storage.CheckUserByEmail(ctx, userInfo.Email)
 	if resp == nil {
 		user.ID = uuid.NewString()
-		user.CreatedAt = time.Now()
-		user.UpdatedAt = time.Now()
+		user.CreatedAt = now
+		user.UpdatedAt = now
 
 		err := s.storage.CreateUser(ctx, user)
 		if err != nil {
@@ -83,7 +74,7 @@ func (s *authService) HandleGoogleCallback(ctx context.Context, req GoogleCallba
 		}
 	} else {
 		user.ID = resp.ID
-		user.UpdatedAt = time.Now()
+		user.UpdatedAt = now
 
 		err := s.storage.UpdateUser(ctx, user)
 		if err != nil {
@@ -91,7 +82,6 @@ func (s *authService) HandleGoogleCallback(ctx context.Context, req GoogleCallba
 		}
 	}
 
-	// 4. Generate JWT ของคุณเอง (ไม่ใช้ของ Google)
 	tokenPair, err := s.generateTokenPair(ctx, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %v", err)
@@ -106,7 +96,6 @@ func (s *authService) HandleGoogleCallback(ctx context.Context, req GoogleCallba
 	return &response, nil
 }
 
-// exchangeGoogleCode - แลก code กับ access token จาก Google
 func (s *authService) exchangeGoogleCode(code string) (string, error) {
 	tokenURL := "https://oauth2.googleapis.com/token"
 
@@ -130,10 +119,6 @@ func (s *authService) exchangeGoogleCode(code string) (string, error) {
 
 	var result struct {
 		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
-		TokenType    string `json:"token_type"`
-		IDToken      string `json:"id_token"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

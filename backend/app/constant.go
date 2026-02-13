@@ -6,13 +6,17 @@ const (
 )
 
 const (
-	InvalidRequestErrorCode = "10000"
-	UnauthorizedErrorCode   = "10003"
-	InternalServerErrorCode = "99999"
+	InvalidRequestErrorCode           = "10000"
+	UserPromptLengthExceededErrorCode = "10001"
+	QuotaExceededErrorCode            = "10002"
+	UnauthorizedErrorCode             = "10003"
+	InternalServerErrorCode           = "99999"
 
-	UnauthorizedErrorMessage   = "unauthorized access"
-	InvalidRequestErrorMessage = "invalid request"
-	InternalServerErrorMessage = "internal server error"
-	ActionLogout               = "logout"
-	ActionRefresh              = "refresh"
+	UserPromptLengthExceededErrorMessage = "user prompt length exceeded"
+	QuotaExceededErrorMessage            = "quota exceeded"
+	UnauthorizedErrorMessage             = "unauthorized access"
+	InvalidRequestErrorMessage           = "invalid request"
+	InternalServerErrorMessage           = "internal server error"
+	ActionLogout                         = "logout"
+	ActionRefresh                        = "refresh"
 )

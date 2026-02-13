@@ -40,7 +40,7 @@ func main() {
 	}
 
 	corsConfig := cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     cfg.AllowedOrigin,
 		AllowMethods:     []string{"GET", "POST", "PATCH", "DELETE"},
 		AllowHeaders:     []string{"Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -104,14 +104,14 @@ func main() {
 		{
 			createChatSessionStorage := service.NewStorage(db)
 			createChatSessionService := service.NewService(cfg, createChatSessionStorage, quotaService)
-			createChatSessionHandler := service.NewHandler(createChatSessionService)
+			createChatSessionHandler := service.NewHandler(createChatSessionService, cfg)
 			api.POST("/session", createChatSessionHandler.CreateChatSessionHandler)
 		}
 
 		{
 			getMessageStorage := service.NewStorage(db)
 			getMessageService := service.NewService(cfg, getMessageStorage, quotaService)
-			getMessageHandler := service.NewHandler(getMessageService)
+			getMessageHandler := service.NewHandler(getMessageService, cfg)
 			api.POST("/model", getMessageHandler.ChatbotProcessModelHandler)
 			api.GET("/ws", getMessageHandler.WebSocketHandler)
 		}

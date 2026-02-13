@@ -53,7 +53,7 @@ func (h *Handler) GoogleCallback(c *gin.Context) {
 		"refresh_token",
 		resp.RefreshToken,
 		30*24*60*60, // 30 days
-		"/auth",     // จำกัดเฉพาะ refresh endpoint
+		"/auth",
 		"",
 		true, 
 		true, // httpOnly=true
@@ -62,9 +62,9 @@ func (h *Handler) GoogleCallback(c *gin.Context) {
 	c.JSON(http.StatusOK, app.Response{
 		Code:    app.SUCCESS_CODE,
 		Message: app.SUCCESS_MSG,
-		Data: map[string]interface{}{
-			"accessToken": resp.AccessToken,
-			"userId":      resp.UserId,
+		Data: LoginResponse{
+			AccessToken:  resp.AccessToken,
+			UserId:       resp.UserId,
 		},
 	})
 }
@@ -96,18 +96,18 @@ func (h *Handler) RefreshTokenProcess(c *gin.Context) {
 		"refresh_token",
 		resp.RefreshToken,
 		30*24*60*60, // 30 days
-		"/auth", // จำกัดเฉพาะ refresh endpoint
+		"/auth",
 		"",
-		true, // secure=true ใน production
+		true, // secure=true
 		true, // httpOnly=true
 	)
 
 	c.JSON(http.StatusOK, app.Response{
 		Code:    app.SUCCESS_CODE,
 		Message: app.SUCCESS_MSG,
-		Data: map[string]interface{}{
-			"accessToken": resp.AccessToken,
-			"user":        resp.UserId,
+		Data: RefreshTokenProcessResponse{
+			AccessToken: resp.AccessToken,
+			UserId:      resp.UserId,
 		},
 	})
 

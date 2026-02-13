@@ -2,10 +2,9 @@ from dotenv import load_dotenv
 import os
 import json
 from copy import deepcopy
-from typing import AsyncGenerator, Callable, Optional
+from typing import AsyncGenerator
 from .utils import (
     get_chatbot_response,
-    get_chatbot_full_response,
     get_chatbot_full_response_stream,
     get_embedding,
     get_closest_result
@@ -13,9 +12,9 @@ from .utils import (
 from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_STREAMING_SYSTEM_PROMTPS
 from openai import AsyncOpenAI
 from pinecone import Pinecone
+from json_repair import repair_json
 
 load_dotenv()
-
 
 def dedup_relevant_text_by_section(text: str) -> str:
     
@@ -68,6 +67,10 @@ class DetailsAgentStreaming:
         self.PLANNER_SYSTEM_PROMPT = PLANNER_SYSTEM_PROMPT
         self.STEP_DEFINER_SYSTEM_PROMPT = STEP_DEFINER_SYSTEM_PROMPT
         self.streaming_system_prompt = DETAIL_STREAMING_SYSTEM_PROMTPS
+        self.totalInputTokens = 0
+        self.totalOutputTokens = 0
+        self.finalOutputTokens = 0
+        self.totalUsedTokens = 0
 
 
     def get_detail(self, list_closest: list) -> str:
@@ -100,17 +103,17 @@ class DetailsAgentStreaming:
         question: str
     ) -> AsyncGenerator[dict, None]:
         question = deepcopy(question)
-        print("Detail Agent (Streaming) : Start non-COT ....")
-        print("Detail Agent (Streaming) : Embedding ......")
+        # print("Detail Agent (Streaming) : Start non-COT ....")
+        # print("Detail Agent (Streaming) : Embedding ......")
         yield {"type": "status", "message": "กำลังค้นหาข้อมูล..."}
         
         embedding_result = await get_embedding(self.token, self.embedding_url, [question])
         vector = embedding_result[0]
 
-        print("Detail Agent : Get closest ......")
+        # print("Detail Agent : Get closest ......")
         result = await get_closest_result(self.pc, self.index_name, vector)
 
-        print("Detail Agent : Get Content from Vector database")
+        # print("Detail Agent : Get Content from Vector database")
         matches = result.get("matches", [])
         docs_str = self.get_detail(matches)
 
@@ -147,7 +150,7 @@ class DetailsAgentStreaming:
             {"role": "user", "content": detail_content},
         ]
 
-        print("Detail Agent : Streaming response ......")
+        # print("Detail Agent : Streaming response ......")
         full_content = ""
         input_tokens = 0
         output_tokens = 0
@@ -164,19 +167,25 @@ class DetailsAgentStreaming:
                     "text": chunk["text"]
                 }
             elif chunk["type"] == "usage":
-                input_tokens = chunk["input_tokens"]
-                output_tokens = chunk["output_tokens"]
+                input_tokens = chunk["inputTokens"]
+                output_tokens = chunk["outputTokens"]
+                total_tokens = chunk["totalTokens"]
 
+        self.totalInputTokens += input_tokens
+        self.totalOutputTokens += output_tokens
+        self.finalOutputTokens = output_tokens
+        self.totalUsedTokens += total_tokens
         # Step 6: Yield completion
         yield {
             "type": "done",
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "full_content": full_content
+            "totalInputTokens": self.totalInputTokens,
+            "totalOutputTokens": self.totalOutputTokens,
+            "finalOutputTokens": self.finalOutputTokens,
+            "totalUsedTokens": self.totalUsedTokens,
+            "fullContent": full_content
         }
 
-        print("Detail Agent (Streaming) : End non-COT ....")
+        # print("Detail Agent (Streaming) : End non-COT ....")
 
     # ============ COT Streaming ============
 
@@ -194,7 +203,7 @@ class DetailsAgentStreaming:
         total_steps = len(response_plan["steps"])
 
         for index, step in enumerate(response_plan["steps"]):
-            print(f"COT definer : {index+1}")
+            # print(f"COT definer : {index+1}")
             
             yield {
                 "type": "cot_step",
@@ -202,6 +211,8 @@ class DetailsAgentStreaming:
                 "total": total_steps,
                 "description": step
             }
+
+            yield {"type": "status", "message": f"กำลังปรับแต่งรอบที่ {index+1}"}
 
             # Step Definer
             definer_prompt = (
@@ -227,9 +238,14 @@ class DetailsAgentStreaming:
                 {"role": "user", "content": definer_prompt},
             ]
 
-            response_definer = await get_chatbot_response(self.client, self.model_name, messages_definer)
+            response_definer, inputTokens, outputTokens, totalTokens = await get_chatbot_response(self.client, self.model_name, messages_definer)
+            self.totalInputTokens += inputTokens
+            self.totalOutputTokens += outputTokens
+            self.totalUsedTokens += totalTokens
+            response_definer = repair_json(response_definer)
             response_definer = json.loads(response_definer)
 
+            yield {"type": "status", "message": f"กำลังค้นหาข้อมูลรอบที่ {index+1}"}
             # Retrieve documents
             embedding_result = await get_embedding(self.token, self.embedding_url, response_definer['query'])
             vector = embedding_result[0]
@@ -239,6 +255,8 @@ class DetailsAgentStreaming:
             docs_str = self.get_detail(matches)
             self.list_docs_str.append(docs_str)
 
+            # print(f"COT QA : {index+1}")
+            yield {"type": "status", "message": f"กำลังวิเคราะห์และสร้างคำตอบรอบที่ {index+1}"}
             QA_prompt = (
                 f"Original question: {question}\n"
                 f"Subquery: {response_definer['query']}\n"
@@ -251,15 +269,19 @@ class DetailsAgentStreaming:
                 {"role": "user", "content": QA_prompt},
             ]
 
-            response_qa = await get_chatbot_response(self.client, self.model_name, messages_QA)
+            response_qa, inputTokens, outputTokens, totalTokens = await get_chatbot_response(self.client, self.model_name, messages_QA)
+            self.totalInputTokens += inputTokens
+            self.totalOutputTokens += outputTokens
+            self.totalUsedTokens += totalTokens
+            response_qa = repair_json(response_qa)
             response_qa = json.loads(response_qa)
             self.history_text.append(response_qa)
             self.joined_text(self.history_text)
 
             # print(f"question : {response_qa['question']}")
-            print(f"sections : {response_qa['sections']}")
-            print(f"ANS : {response_qa['ans']}")
-            print(f"Step {index+1} completed: {response_qa.get('question', 'N/A')}")
+            # print(f"sections : {response_qa['sections']}")
+            # print(f"ANS : {response_qa['ans']}")
+            # print(f"Step {index+1} completed: {response_qa.get('question', 'N/A')}")
         self.join_step(self.history_text)
 
     async def get_response_COT_stream(
@@ -272,7 +294,7 @@ class DetailsAgentStreaming:
         self.joined_step = ""
         
         question = deepcopy(question)
-        print("Plan Agent : Start ....")
+        # print("Plan Agent : Start ....")
         yield {"type": "status", "message": "กำลังวางแผนการค้นหา..."}
 
         # Step 1: Planning
@@ -282,7 +304,7 @@ class DetailsAgentStreaming:
             f"Question:\n{question}\n\n"
             "Instructions:\n"
             "- Identify whether the query is single-hop or requires multiple steps.\n"
-            "- Produce between 1 and 4  ordered steps that resolve the question via retrieval.\n"
+            "- Produce Limit 3 ordered steps that resolve the question via retrieval.\n"
             "- Each step must be a concrete sub-question or aggregation task (no verification-only steps).\n\n"
             "Return ONLY a single JSON object. No explanations, no markdown, no extra text.\n"
             "{\n"
@@ -296,7 +318,11 @@ class DetailsAgentStreaming:
             {"role":"user","content": user_prompt},
         ]
 
-        response = await get_chatbot_response(self.client, self.model_name, messages)
+        response, inputTokens, outputTokens, totalTokens = await get_chatbot_response(self.client, self.model_name, messages)
+        self.totalInputTokens += inputTokens
+        self.totalOutputTokens += outputTokens
+        self.totalUsedTokens += totalTokens
+        response = repair_json(response)
         response_plan = json.loads(response)
 
         yield {
@@ -304,10 +330,10 @@ class DetailsAgentStreaming:
             "steps": response_plan["steps"],
             "rationale": response_plan.get("rationale", "")
         }
-        print("Plan Agent : ")
-        for index, step in enumerate(response_plan["steps"]):
-            print( f"{index+1}: {step}")
-        print("Plan Agent : End ....")
+        # print("Plan Agent : ")
+        # for index, step in enumerate(response_plan["steps"]):
+        #     print( f"{index+1}: {step}")
+        # print("Plan Agent : End ....")
 
         # Step 2: Execute COT steps
         async for update in self._run_COT_steps(question, response_plan):
@@ -315,7 +341,7 @@ class DetailsAgentStreaming:
 
         yield {"type": "status", "message": "กำลังสรุปคำตอบ..."}
 
-        print("Start combine text.......")
+        # print("Start combine text.......")
         # Step 3: Combine and generate final answer
         joined_text = "\n\n".join(self.list_docs_str)
         text = dedup_relevant_text_by_section(joined_text)
@@ -355,7 +381,7 @@ class DetailsAgentStreaming:
         ]
 
         # Step 4: Stream final response
-        print("Detail Agent : Streaming final response ......")
+        # print("Detail Agent : Streaming final response ......")
         full_content = ""
         input_tokens = 0
         output_tokens = 0
@@ -372,20 +398,27 @@ class DetailsAgentStreaming:
                     "text": chunk["text"]
                 }
             elif chunk["type"] == "usage":
-                input_tokens = chunk["input_tokens"]
-                output_tokens = chunk["output_tokens"]
+                input_tokens = chunk["inputTokens"]
+                output_tokens = chunk["outputTokens"]
+                total_tokens = chunk["totalTokens"]
 
+        self.totalInputTokens += input_tokens
+        self.totalOutputTokens += output_tokens
+        self.finalOutputTokens = output_tokens
+        self.totalUsedTokens += total_tokens
         # Step 5: Yield completion
         yield {
             "type": "done",
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-            "full_content": full_content
+            "totalInputTokens": self.totalInputTokens,
+            "totalOutputTokens": self.totalOutputTokens,
+            "finalOutputTokens": self.finalOutputTokens,
+            "totalUsedTokens": self.totalUsedTokens,
+            "fullContent": full_content
         }
 
-        print("input_tokens : " ,input_tokens)
-        print("output_tokens : " ,output_tokens)
-        print("total_tokens : " ,input_tokens + output_tokens)
+        self.totalInputTokens = 0
+        self.totalOutputTokens = 0
+        self.finalOutputTokens = 0
+        self.totalUsedTokens = 0
 
-        print("Detail Agent (Streaming COT) : End ....")
+        # print("Detail Agent (Streaming COT) : End ....")

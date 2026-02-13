@@ -5,18 +5,21 @@ import (
 	"net/http"
 
 	"github.com/PatiharnKam/AiLaw/app"
+	"github.com/PatiharnKam/AiLaw/config"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 )
 
 type Handler struct {
 	service   Service
+	cfg       *config.Config
 	validator *validator.Validate
 }
 
-func NewHandler(service Service) *Handler {
+func NewHandler(service Service, cfg *config.Config) *Handler {
 	return &Handler{
 		service:   service,
+		cfg: cfg,
 		validator: validator.New(),
 	}
 }
@@ -91,16 +94,23 @@ func (h *Handler) ChatbotProcessModelHandler(c *gin.Context) {
 	resp, err := h.service.ChatbotProcess(ctx, req)
 	if err != nil {
 		logger.Error("error from service layer : " + err.Error())
-		c.JSON(http.StatusInternalServerError, app.Response{
-			Code:    app.InternalServerErrorCode,
-			Message: app.InternalServerErrorMessage,
-		})
-		return
+		switch resp.Code {
+		case app.UserPromptLengthExceededErrorCode:
+			c.JSON(http.StatusBadRequest, resp)
+			return
+
+		case app.QuotaExceededErrorCode:
+			c.JSON(http.StatusBadRequest, resp)
+			return
+
+		default:
+			c.JSON(http.StatusInternalServerError, app.Response{
+				Code:    app.InternalServerErrorCode,
+				Message: app.InternalServerErrorMessage,
+			})
+			return
+		}
 	}
 
-	c.JSON(http.StatusOK, app.Response{
-		Code:    app.SUCCESS_CODE,
-		Message: app.SUCCESS_MSG,
-		Data:    resp,
-	})
+	c.JSON(http.StatusOK, resp)
 }

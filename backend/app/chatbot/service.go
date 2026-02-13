@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/PatiharnKam/AiLaw/app"
 	"github.com/PatiharnKam/AiLaw/app/quota"
 	"github.com/PatiharnKam/AiLaw/config"
+	"github.com/google/uuid"
 )
 
 type MessageService struct {
@@ -30,70 +32,99 @@ func NewService(cfg *config.Config, storage Storage, quotaService quota.QuotaSer
 
 }
 
-func (s *MessageService) CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (CreateChatSessionResponse, error) {
+func (s *MessageService) CreateChatSessionService(ctx context.Context, req CreateChatSessionRequest) (*CreateChatSessionResponse, error) {
 	resp, err := s.storage.CreateSession(ctx, req)
 	if err != nil {
-		return CreateChatSessionResponse{}, fmt.Errorf("error when create session : %w", err)
+		return nil, fmt.Errorf("error when create session : %w", err)
 	}
-	return *resp, nil
+	return resp, nil
 }
 
-func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (*GetMessageResponse, error) {
+func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (app.Response, error) {
 	userPromptTokens, err := s.quotaService.CheckPromptLength(req.Input.Messages.Content)
 	if err != nil {
-		return nil, fmt.Errorf("prompt length exceeded : %w", err)
+		return app.Response{
+			Code:    app.UserPromptLengthExceededErrorCode,
+			Message: app.UserPromptLengthExceededErrorMessage,
+		}, fmt.Errorf("prompt length exceeded: %w", err)
 	}
 
 	quotaStatus, err := s.quotaService.CheckQuota(ctx, req.UserId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check quota: %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("failed to check quota: %w", err)
 	}
 
 	fmt.Println()
 	slog.Info("quota status", "status", quotaStatus)
 
 	if quotaStatus.IsExceeded {
-		return nil, fmt.Errorf("daily quota exceeded")
+		return app.Response{
+			Code:    app.QuotaExceededErrorCode,
+			Message: app.QuotaExceededErrorMessage,
+		}, fmt.Errorf(app.QuotaExceededErrorMessage)
 	}
 
 	err = s.storage.UpdateLastMessageAt(ctx, req.UserId, req.SessionId)
 	if err != nil {
-		return nil, fmt.Errorf("error when update last message at session : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error when update last message at session : %w", err)
 	}
 
 	resp, err := s.callChatbot(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("failed when call chatbot : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("failed when call chatbot : %w", err)
 	}
 
-	err = s.storage.SaveUserMessage(ctx, req.SessionId, req.Input.Messages.Content, userPromptTokens)
+	modelMessageId := uuid.NewString()
+	err = s.storage.SaveUserMessage(ctx, req.UserId, req.SessionId, modelMessageId, req.Input.Messages.Content, userPromptTokens)
 	if err != nil {
-		return nil, fmt.Errorf("error when save user message at session : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error when save user message at session : %w", err)
 	}
 
 	modelmessageDetail := ModelMessageDetail{
-		Content:          resp.Content,
-		PromptTokens:     &resp.InputTokens,
-		CompletionTokens: &resp.TotalTokens,
+		ModelType:         req.ModelType,
+		Content:           resp.Content,
+		TotalInputTokens:  resp.TotalInputTokens,
+		TotalOutputTokens: resp.TotalOutputTokens,
+		FinalOutputTokens: resp.FinalOutputTokens,
+		TotalUsedTokens:   resp.TotalUsedTokens,
 	}
 
-	messageID, err := s.storage.SaveModelMessage(ctx, req.SessionId, modelmessageDetail)
+	err = s.storage.SaveModelMessage(ctx, req.UserId, req.SessionId, modelMessageId, modelmessageDetail)
 	if err != nil {
-		return nil, fmt.Errorf("error when save model message at session : %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error when save model message at session : %w", err)
 	}
 
-	err = s.quotaService.ConsumeTokens(ctx, req.UserId, int64(resp.TotalTokens))
+	err = s.quotaService.ConsumeTokens(ctx, req.UserId, int64(resp.TotalUsedTokens))
 	if err != nil {
-		return nil, fmt.Errorf("failed to consume tokens: %w", err)
+		slog.Error("failed to consume tokens", "error", err)
 	}
 
 	fmt.Println()
 	slog.Info("resp is", "response", resp)
 	fmt.Println()
 
-	return &GetMessageResponse{
-		Message:        modelmessageDetail.Content,
-		ModelMessageID: messageID,
+	return app.Response{
+		Code:    app.SUCCESS_CODE,
+		Message: app.SUCCESS_MSG,
+		Data: GetMessageResponse{
+			Message:        modelmessageDetail.Content,
+			ModelMessageID: modelMessageId,
+		},
 	}, nil
 }
 

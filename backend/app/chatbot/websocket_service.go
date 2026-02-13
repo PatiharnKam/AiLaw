@@ -10,53 +10,58 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/PatiharnKam/AiLaw/app"
+	"github.com/google/uuid"
 )
 
-// chatbotProcessStreamInternal - internal streaming implementation
-func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req ChatbotProcessRequest, onChunk StreamCallback) (*StreamingMessageResponse, error) {
+func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req ChatbotProcessRequest, onChunk StreamCallback) (app.Response, error) {
 	logger := slog.Default()
 
-	// 1. Check prompt length
 	userPromptTokens, err := s.quotaService.CheckPromptLength(req.Input.Messages.Content)
 	if err != nil {
-		return nil, fmt.Errorf("prompt length exceeded: %w", err)
+		return app.Response{
+			Code:    app.UserPromptLengthExceededErrorCode,
+			Message: app.UserPromptLengthExceededErrorMessage,
+		}, fmt.Errorf("prompt length exceeded: %w", err)
 	}
 
-	// 2. Check quota
 	quotaStatus, err := s.quotaService.CheckQuota(ctx, req.UserId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check quota: %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("failed to check quota: %w", err)
 	}
 
 	if quotaStatus.IsExceeded {
-		return nil, fmt.Errorf("daily quota exceeded")
+		return app.Response{
+			Code:    app.QuotaExceededErrorCode,
+			Message: app.QuotaExceededErrorMessage,
+		}, fmt.Errorf("daily quota exceeded")
 	}
 
-	// 3. Update last message timestamp
 	err = s.storage.UpdateLastMessageAt(ctx, req.UserId, req.SessionId)
 	if err != nil {
-		return nil, fmt.Errorf("error updating last message: %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error updating last message: %w", err)
 	}
-
-	// 4. Save user message
-	err = s.storage.SaveUserMessage(ctx, req.SessionId, req.Input.Messages.Content, userPromptTokens)
-	if err != nil {
-		return nil, fmt.Errorf("error saving user message: %w", err)
-	}
-
-	// 5. Call FastAPI streaming endpoint
-	var fullContent string
-	var inputTokens, outputTokens int
 
 	modelURL := s.cfg.Model.ModelStreamURL
 	if req.ModelType == "COT" {
 		modelURL = s.cfg.Model.ModelCOTStreamURL
 	}
 
+	modelMessageDetail := ModelMessageDetail{
+		ModelType: req.ModelType,
+	}
+
 	err = s.callFastAPIStream(ctx, req, modelURL, func(event StreamEvent) {
 		switch event.Type {
 		case "content":
-			fullContent += event.Text
+			modelMessageDetail.Content += event.Text
 			if onChunk != nil {
 				onChunk(event)
 			}
@@ -65,58 +70,55 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 				onChunk(event)
 			}
 		case "done":
-			inputTokens = event.InputTokens
-			outputTokens = event.OutputTokens
+			modelMessageDetail.TotalInputTokens = event.TotalInputTokens
+			modelMessageDetail.TotalOutputTokens = event.TotalOutputTokens
+			modelMessageDetail.FinalOutputTokens = event.FinalOutputTokens
+			modelMessageDetail.TotalUsedTokens = event.TotalUsedTokens
 			if event.FullContent != "" {
-				fullContent = event.FullContent
+				modelMessageDetail.Content = event.FullContent
 			}
 		case "error":
 			logger.Error("stream error", "error", event.Error)
+			err = fmt.Errorf("model error: %s", event.Error)
 		}
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("streaming error: %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("streaming error: %w", err)
 	}
 
-	totalTokens := inputTokens + outputTokens
-
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("totalTokens :",totalTokens)
-	fmt.Println("inputTokens :",inputTokens)
-	fmt.Println("outputTokens :",outputTokens)
-	fmt.Println()
-	fmt.Println()
-
-	// 6. Save model message
-	modelMessageDetail := ModelMessageDetail{
-		Content:          fullContent,
-		PromptTokens:     &inputTokens,
-		CompletionTokens: &totalTokens,
-	}
-
-	messageID, err := s.storage.SaveModelMessage(ctx, req.SessionId, modelMessageDetail)
+	modelMessageId := uuid.NewString()
+	err = s.storage.SaveUserMessage(ctx, req.UserId, req.SessionId, modelMessageId, req.Input.Messages.Content, userPromptTokens)
 	if err != nil {
-		return nil, fmt.Errorf("error saving model message: %w", err)
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error saving user message: %w", err)
 	}
 
-	// 7. Consume tokens
-	err = s.quotaService.ConsumeTokens(ctx, req.UserId, int64(totalTokens))
+	err = s.storage.SaveModelMessage(ctx, req.UserId, req.SessionId, modelMessageId, modelMessageDetail)
+	if err != nil {
+		return app.Response{
+			Code:    app.InternalServerErrorCode,
+			Message: app.InternalServerErrorMessage,
+		}, fmt.Errorf("error saving model message: %w", err)
+	}
+
+	err = s.quotaService.ConsumeTokens(ctx, req.UserId, int64(modelMessageDetail.TotalUsedTokens))
 	if err != nil {
 		logger.Warn("failed to consume tokens", "error", err)
 	}
 
-	// 8. Get remaining quota
-	newQuotaStatus, _ := s.quotaService.CheckQuota(ctx, req.UserId)
-
-	return &StreamingMessageResponse{
-		Message:        fullContent,
-		ModelMessageID: messageID,
-		InputTokens:    inputTokens,
-		OutputTokens:   outputTokens,
-		TotalTokens:    totalTokens,
-		Remaining:      newQuotaStatus.Remaining,
+	return app.Response{
+		Code:    app.SUCCESS_CODE,
+		Message: app.SUCCESS_MSG,
+		Data: StreamingMessageResponse{
+			Message:        modelMessageDetail.Content,
+			ModelMessageID: modelMessageId,
+		},
 	}, nil
 }
 

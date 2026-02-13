@@ -12,5 +12,5 @@ type FeedbackStorage interface {
 
 type FeedbackRequest struct {
 	MessageID string `json:"messageID" validate:"required,uuid4"`
-	Feedback  int    `json:"feedback" validate:"required,oneof=1 -1"`
+	Feedback  *int   `json:"feedback" validate:"omitempty,oneof=1 -1"`
 }

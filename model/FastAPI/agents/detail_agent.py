@@ -3,9 +3,9 @@ import os, json
 from copy import deepcopy
 from .utils  import get_chatbot_response, get_embedding, get_closest_result, get_chatbot_full_response
 from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_SYSTEM_PROMTPS
-# from openai import OpenAI
 from openai import AsyncOpenAI
 from pinecone import Pinecone
+from json_repair import repair_json
 load_dotenv()
 
 
@@ -67,13 +67,19 @@ class DetailsAgent():
         self.PLANNER_SYSTEM_PROMPT = PLANNER_SYSTEM_PROMPT
         self.STEP_DEFINER_SYSTEM_PROMPT = STEP_DEFINER_SYSTEM_PROMPT
         self.system_prompt = DETAIL_SYSTEM_PROMTPS
+        self.totalInputTokens = 0
+        self.totalOutputTokens = 0
+        self.finalOutputTokens = 0
+        self.totalUsedTokens = 0
 
     def postprocess(self, 
                     output,
-                    input_token,
-                    output_token,
-                    total_token):
-        output = json.loads(output)
+                    totalInputTokens,
+                    totalOutputTokens,
+                    finalOutputTokens,
+                    totalUsedTokens):
+        outputJSON = repair_json(output)
+        output = json.loads(outputJSON)
         dict_output = {
             "role" : "assistant",
             "content" : output['ans'],
@@ -81,9 +87,10 @@ class DetailsAgent():
                 "agent" : "detail agent",
                 "sections" : output['sections']
             },
-            "input_tokens" :input_token,
-            "output_tokens":output_token,
-            "total_tokens" :total_token
+            "totalInputTokens" :totalInputTokens,
+            "totalOutputTokens":totalOutputTokens,
+            "finalOutputTokens" :finalOutputTokens,
+            "totalUsedTokens" :totalUsedTokens
         }
         return dict_output
 
@@ -113,7 +120,7 @@ class DetailsAgent():
             
     async def COT(self, question: str, response):
         for index, step in enumerate(response["steps"]):
-            print(f"COT definer : {index+1}")
+            # print(f"COT definer : {index+1}")
             # Step : Definer
             definer_prompt = (
                 f"Original question:\n{question}\n\n"
@@ -137,7 +144,11 @@ class DetailsAgent():
                 {"role":"system","content": self.STEP_DEFINER_SYSTEM_PROMPT},
                 {"role":"user","content": definer_prompt},
             ]
-            response_definer = await get_chatbot_response(self.client, self.model_name, messages_definer)
+            response_definer, inputTokens, outputTokens, totalTokens = await get_chatbot_response(self.client, self.model_name, messages_definer)
+            self.totalInputTokens += inputTokens
+            self.totalOutputTokens += outputTokens
+            self.totalUsedTokens += totalTokens
+            response_definer = repair_json(response_definer)
             response_definer = json.loads(response_definer)
             # print(response_definer)
             
@@ -160,32 +171,36 @@ class DetailsAgent():
                 {"role":"system","content": self.system_prompt},
                 {"role":"user","content": QA_prompt},
             ]
-            response_qa = await get_chatbot_response(self.client, self.model_name, messages_QA)
+            response_qa, inputTokens, outputTokens, totalTokens = await get_chatbot_response(self.client, self.model_name, messages_QA)
+            self.totalInputTokens += inputTokens
+            self.totalOutputTokens += outputTokens
+            self.totalUsedTokens += totalTokens
+            response_qa = repair_json(response_qa)
             response_qa = json.loads(response_qa)
             self.history_text.append(response_qa)
             self.joined_text(self.history_text)
     
-            print(f"question : {response_qa['question']}")
-            print(f"sections : {response_qa['sections']}")
-            print(f"ANS : {response_qa['ans']}")
+            # print(f"question : {response_qa['question']}")
+            # print(f"sections : {response_qa['sections']}")
+            # print(f"ANS : {response_qa['ans']}")
         self.join_step(self.history_text)
     
     
-    async def get_response(self, question: str):
+    async def get_response_COT(self, question: str):
         self.list_docs_str = []
         self.history_text = []
         self.joined_history_text = ""
         self.joined_step = ""
         
         question = deepcopy(question)
-        print("Plan Agent : Start ....")
+        # print("Plan Agent : Start ....")
         user_prompt = (
             "You are a planning specialist for a legal Retrieval-Augmented Generation pipeline.\n"
             "Deconstruct the user's question into a minimal sequence of retrieval steps.\n\n"
             f"Question:\n{question}\n\n"
             "Instructions:\n"
             "- Identify whether the query is single-hop or requires multiple steps.\n"
-            "- Produce between 1 and 4  ordered steps that resolve the question via retrieval.\n"
+            "- Produce Limit 3 ordered steps that resolve the question via retrieval.\n"
             "- Each step must be a concrete sub-question or aggregation task (no verification-only steps).\n\n"
             "Return ONLY a single JSON object. No explanations, no markdown, no extra text.\n"
             "Use this EXACT schema:\n"
@@ -198,28 +213,29 @@ class DetailsAgent():
             {"role":"system","content": self.PLANNER_SYSTEM_PROMPT},
             {"role":"user","content": user_prompt},
         ]
-        response = await get_chatbot_response(self.client, self.model_name, messages)
+        response, inputTokens, outputTokens, totalTokens = await get_chatbot_response(self.client, self.model_name, messages)
+        self.totalInputTokens += inputTokens
+        self.totalOutputTokens += outputTokens
+        self.totalUsedTokens += totalTokens
+        response = repair_json(response)
         response_plan = json.loads(response)
-        print("Plan Agent : ")
-        for index, step in enumerate(response_plan["steps"]):
-            print( f"{index+1}: {step}")
-        print("Plan Agent : End ....")
+        # print("Plan Agent : ")
+        # for index, step in enumerate(response_plan["steps"]):
+        #     print( f"{index+1}: {step}")
+        # print("Plan Agent : End ....")
         
-        print("COT Agent : Start COT ....")
+        # print("COT Agent : Start COT ....")
         await self.COT(
             question = question,
             response = response_plan
         )
-        print("COT Agent : End COT ....")
-        # print(f"Joined_history_text : \n{self.joined_history_text}")
-        # print(f"Joined_step : \n{self.joined_step}")
-        
+        # print("COT Agent : End COT ....")
 
-        print("Start combine text.......")
+        # print("Start combine text.......")
         joined_text = "\n\n".join(self.list_docs_str)
         text = dedup_relevant_text_by_section(joined_text)
 
-        print("Start create detail content .......")
+        # print("Start create detail content .......")
         detail_content = f"""
             Original question:
             {question}
@@ -252,26 +268,35 @@ class DetailsAgent():
             {"role":"system","content": self.system_prompt},
             {"role":"user","content": detail_content},
         ]
-        print("Detail Agent : user content")
-        print("Detail Agent : Prompting......")
+        # print("Detail Agent : user content")
+        # print("Detail Agent : Prompting......")
         chatbot_output = await get_chatbot_full_response(self.client, self.model_name, messages)
+        self.totalInputTokens += chatbot_output.usage.prompt_tokens
+        self.totalOutputTokens += chatbot_output.usage.completion_tokens
+        self.finalOutputTokens = chatbot_output.usage.completion_tokens
+        self.totalUsedTokens += chatbot_output.usage.total_tokens
         output = self.postprocess(output       = chatbot_output.choices[0].message.content,
-                                  input_token  = chatbot_output.usage.prompt_tokens,
-                                  output_token = chatbot_output.usage.completion_tokens,
-                                  total_token  = chatbot_output.usage.total_tokens)
+                                  totalInputTokens  = self.totalInputTokens,
+                                  totalOutputTokens = self.totalOutputTokens,
+                                  finalOutputTokens = self.finalOutputTokens,
+                                  totalUsedTokens  = self.totalUsedTokens)
+        self.totalInputTokens = 0
+        self.totalOutputTokens = 0
+        self.finalOutputTokens = 0
+        self.totalUsedTokens = 0
         return output
     
     async def get_response_non_COT(self, question: str):
         question = deepcopy(question)
-        print("Detail Agent : Start non-COT ....")
-        print("Detail Agent : Embedding ......")
+        # print("Detail Agent : Start non-COT ....")
+        # print("Detail Agent : Embedding ......")
         embedding_result = await get_embedding(self.token, self.embedding_url, [question])
         vector = embedding_result[0]
         
-        print("Detail Agent : Get closest ......")
+        # print("Detail Agent : Get closest ......")
         result = await get_closest_result(self.pc, self.index_name, vector)
         
-        print("Detail Agent : Get Content from Vector database")
+        # print("Detail Agent : Get Content from Vector database")
         matches = result.get("matches", [])
         docs_str = self.get_detail(matches)
         
@@ -303,10 +328,11 @@ class DetailsAgent():
             {"role":"system","content": self.system_prompt},
             {"role":"user","content": detail_content},
         ]
-        print("Detail Agent : non-COT Prompting ......")
+        # print("Detail Agent : non-COT Prompting ......")
         chatbot_output = await get_chatbot_full_response(self.client, self.model_name, messages)
         output = self.postprocess(output       = chatbot_output.choices[0].message.content,
-                                  input_token  = chatbot_output.usage.prompt_tokens,
-                                  output_token = chatbot_output.usage.completion_tokens,
-                                  total_token  = chatbot_output.usage.total_tokens)
+                                  totalInputTokens  = chatbot_output.usage.prompt_tokens,
+                                  totalOutputTokens = chatbot_output.usage.completion_tokens,
+                                  finalOutputTokens = chatbot_output.usage.completion_tokens,
+                                  totalUsedTokens  = chatbot_output.usage.total_tokens)
         return output

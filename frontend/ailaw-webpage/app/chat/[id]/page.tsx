@@ -6,6 +6,9 @@ import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { useModelType } from "@/hooks/useModelType"
 import { useWebSocket, WSResponse } from "@/hooks/useWebSocket"
+import { useToast } from "@/hooks/useToast"
+import { ToastContainer } from "@/components/toast"
+import { parseApiError, parseWSError } from "@/utils/errorMapping"
 import { SharedSidebar } from "@/components/shared-sidebar"
 import { ChatInput } from "@/components/chat-input"
 import { usePrompt } from "@/components/prompt-context"
@@ -17,12 +20,12 @@ interface Message {
   content: string
   createdAt: string
   feedback: number | null
-  isStreaming?: boolean  // New: flag for streaming message
+  isStreaming?: boolean
+  statusMessage?: string
 }
 
 interface Chat {
   sessionId: string
-  title: string
   messages: Message[]
 }
 
@@ -46,11 +49,11 @@ export default function ChatPage() {
   const isRefreshingRef = useRef(false)
   const previousMessageCountRef = useRef(0)
   const streamingMessageIdRef = useRef<string | null>(null)
+  const { toasts, removeToast, showError } = useToast()
+  const pendingMessageRef = useRef<string>("")
 
   // ============ WebSocket Setup ============
   const handleChunk = useCallback((content: string, sessionId: string) => {
-    console.log("📝 Chunk received, length:", content.length)
-
     setChat(prev => {
       if (!prev) return prev
 
@@ -59,6 +62,27 @@ export default function ChatPage() {
           return {
             ...m,
             content: m.content + content,
+            statusMessage: undefined,
+          }
+        }
+        return m
+      })
+
+      return { ...prev, messages }
+    })
+  }, [])
+
+  const handleStatus = useCallback((status: string) => {
+    console.log("📊 Status:", status)
+    
+    setChat(prev => {
+      if (!prev) return prev
+
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            statusMessage: status,  //status message
           }
         }
         return m
@@ -74,18 +98,16 @@ export default function ChatPage() {
 
       const streamingMsg = prev.messages.find(m => m.isStreaming)
       if (!streamingMsg) {
-        console.log("⚠️ No streaming message in state!")
         return prev
       }
-
-      console.log("📝 Found streaming message:", streamingMsg.messageId)
 
       const messages = prev.messages.map(m => {
         if (m.isStreaming) {
           return {
             ...m,
             messageId: response.modelMessageId || m.messageId,
-            isStreaming: false,  
+            isStreaming: false,
+            statusMessage: undefined,
           }
         }
         return m
@@ -95,41 +117,49 @@ export default function ChatPage() {
     })
 
     streamingMessageIdRef.current = null
+    pendingMessageRef.current = ""
     setIsSending(false)
-
-    if (response.usage) {
-      console.log("Token usage:", response.usage)
-    }
   }, [])
 
-  const handleError = useCallback((error: string) => {
+  const handleError = useCallback((error: string | any) => {
+    const errorInfo = parseWSError(error)
+    showError(errorInfo.title, errorInfo.message)
+    
+    const messageToRestore = pendingMessageRef.current
+    if (messageToRestore) {
+      setInput(messageToRestore)
+      pendingMessageRef.current = ""
+    }
+    
     setChat(prev => {
       if (!prev) return prev
+      const messagesWithoutError = prev.messages.filter(m => !m.isStreaming)
+      
+      if (messagesWithoutError.length > 0) {
+        const lastMessage = messagesWithoutError[messagesWithoutError.length - 1]
+        if (lastMessage.role === "user") {
+          return {
+            ...prev,
+            messages: messagesWithoutError.slice(0, -1)
+          }
+        }
+      }
+      
       return {
         ...prev,
-        messages: prev.messages.map(m => {
-          if (m.isStreaming) {
-            return {
-              ...m,
-              content: m.content || `เกิดข้อผิดพลาด: ${error}`,
-              isStreaming: false,
-            }
-          }
-          return m
-        }),
+        messages: messagesWithoutError
       }
     })
     
     streamingMessageIdRef.current = null
     setIsSending(false)
-  }, [])
+  }, [showError])
 
   const { isConnected, sendChat } = useWebSocket(accessToken, {
     onChunk: handleChunk,
     onDone: handleDone,
     onError: handleError,
-    onConnect: () => console.log("WebSocket connected"),
-    onDisconnect: () => console.log("WebSocket disconnected"),
+    onStatus: handleStatus,
   })
 
   // ============ Initialization ============
@@ -160,7 +190,6 @@ export default function ChatPage() {
   useEffect(() => {
     const currentMessageCount = chat?.messages?.length || 0
     
-    //Check for new message
     if (currentMessageCount > previousMessageCountRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
     }
@@ -169,19 +198,18 @@ export default function ChatPage() {
   }, [chat?.messages?.length])
 
   useEffect(() => {
-  const streamingMessage = chat?.messages.find(m => m.isStreaming)
-  
-  if (streamingMessage) {
-    // ใช้ requestAnimationFrame เพื่อรอ DOM update
-    const scrollToBottom = () => {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      })
-    }
+    const streamingMessage = chat?.messages.find(m => m.isStreaming)
     
-    scrollToBottom()
-  }
-}, [chat?.messages])
+    if (streamingMessage) {
+      const scrollToBottom = () => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        })
+      }
+      
+      scrollToBottom()
+    }
+  }, [chat?.messages])
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("chatbot-theme")
@@ -215,6 +243,7 @@ export default function ChatPage() {
 
     if (data?.data?.action === "logout") {
       logout()
+      throw new Error("Logged out")
     }
     
     if (data?.data?.action === "refresh") {
@@ -235,7 +264,10 @@ export default function ChatPage() {
       }
     }
 
-    if (!res.ok) throw new Error(data.message || "API request failed")
+    if (!res.ok) {
+      throw data
+    }
+    
     return data
   }, [getToken, refreshToken, logout])
 
@@ -244,14 +276,15 @@ export default function ChatPage() {
       const data = await apiFetch(`/api/messages-history/${chatId}`, { method: "GET" })
       setChat({
         sessionId: chatId,
-        title: data.data[0]?.content?.slice(0, 50) || "New Chat",
         messages: data.data || [],
       })
-    } catch (error) {
-      console.error("Failed to load messages:", error)
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
       router.push("/welcome")
     }
-  }, [apiFetch, chatId, router])
+  }, [apiFetch, chatId, router, showError])
 
   // ============ Send Message (WebSocket) ============
   const sendMessage = useCallback(async (messageContent: string) => {
@@ -260,7 +293,8 @@ export default function ChatPage() {
     const tempUserId = crypto.randomUUID()
     const tempModelId = crypto.randomUUID()
 
-    // Add user message
+    pendingMessageRef.current = messageContent
+
     const userMessage: Message = {
       messageId: tempUserId,
       role: "user",
@@ -269,7 +303,6 @@ export default function ChatPage() {
       feedback: null,
     }
 
-    // Add empty model message (will be filled by streaming)
     const modelMessage: Message = {
       messageId: tempModelId,
       role: "model",
@@ -277,26 +310,22 @@ export default function ChatPage() {
       createdAt: new Date().toISOString(),
       feedback: null,
       isStreaming: true,
+      statusMessage: "กำลังประมวลผล...",
     }
 
     setChat(prev => ({
       sessionId: prev?.sessionId ?? chatId,
-      title: prev?.title ?? "New Chat",
       messages: [...(prev?.messages ?? []), userMessage, modelMessage],
     }))
 
     setIsSending(true)
     streamingMessageIdRef.current = tempModelId
 
-    // Send via WebSocket
     const sent = sendChat(chatId, messageContent, modelType)
 
     if (!sent) {
-      // Fallback to HTTP if WebSocket not connected
-      console.warn("WebSocket not connected, falling back to HTTP")
       await sendMessageHTTP(messageContent, tempUserId, tempModelId)
     }
-    // await sendMessageHTTP(messageContent, tempUserId, tempModelId)
   }, [chatId, modelType, isSending, sendChat])
 
   // Fallback HTTP send (if WebSocket fails)
@@ -326,15 +355,19 @@ export default function ChatPage() {
                 messageId: data.data.modelMessageID,
                 content: data.data?.message || "No response",
                 isStreaming: false,
+                statusMessage: undefined,
               }
             }
             return m
           }),
         }
       })
-    } catch (error) {
-      console.error("HTTP fallback failed:", error)
-      // Remove messages on error
+      
+      pendingMessageRef.current = ""
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
       setChat(prev => {
         if (!prev) return prev
         return {
@@ -345,11 +378,12 @@ export default function ChatPage() {
         }
       })
       setInput(messageContent)
+      pendingMessageRef.current = ""
     } finally {
       setIsSending(false)
       streamingMessageIdRef.current = null
     }
-  }, [apiFetch, chatId, modelType])
+  }, [apiFetch, chatId, modelType, showError])
 
   // ============ Event Handlers ============
   const toggleTheme = () => {
@@ -371,6 +405,11 @@ export default function ChatPage() {
   }
 
   const handleLike = useCallback(async (messageId: string) => {
+    const currentMessage = chat?.messages.find(m => m.messageId === messageId)
+    if (!currentMessage) return
+
+    const newFeedback = currentMessage.feedback === 1 ? null : 1
+
     try {
       setChat(prev => {
         if (!prev) return prev
@@ -378,7 +417,7 @@ export default function ChatPage() {
           ...prev,
           messages: prev.messages.map(msg =>
             msg.messageId === messageId
-              ? { ...msg, feedback: msg.feedback === 1 ? null : 1 }
+              ? { ...msg, feedback: newFeedback }
               : msg
           ),
         }
@@ -386,14 +425,33 @@ export default function ChatPage() {
 
       await apiFetch(`/api/feedback/${messageId}`, {
         method: "PATCH",
-        body: JSON.stringify({ feedback: 1 }),
+        body: JSON.stringify({ feedback: newFeedback }),
       })
-    } catch (error) {
-      console.error("Failed to send like feedback:", error)
+      
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: currentMessage.feedback }
+              : msg
+          ),
+        }
+      })
     }
-  }, [apiFetch])
+  }, [apiFetch, chat?.messages, showError])
 
   const handleDislike = useCallback(async (messageId: string) => {
+    const currentMessage = chat?.messages.find(m => m.messageId === messageId)
+    if (!currentMessage) return
+
+    const newFeedback = currentMessage.feedback === -1 ? null : -1
+
     try {
       setChat(prev => {
         if (!prev) return prev
@@ -401,7 +459,7 @@ export default function ChatPage() {
           ...prev,
           messages: prev.messages.map(msg =>
             msg.messageId === messageId
-              ? { ...msg, feedback: msg.feedback === -1 ? null : -1 }
+              ? { ...msg, feedback: newFeedback }
               : msg
           ),
         }
@@ -409,17 +467,33 @@ export default function ChatPage() {
 
       await apiFetch(`/api/feedback/${messageId}`, {
         method: "PATCH",
-        body: JSON.stringify({ feedback: -1 }),
+        body: JSON.stringify({ feedback: newFeedback }),
       })
-    } catch (error) {
-      console.error("Failed to send dislike feedback:", error)
+      
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      
+      setChat(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          messages: prev.messages.map(msg =>
+            msg.messageId === messageId
+              ? { ...msg, feedback: currentMessage.feedback }
+              : msg
+          ),
+        }
+      })
     }
-  }, [apiFetch])
+  }, [apiFetch, chat?.messages, showError])
 
   if (!chat) return null
 
   return (
     <div className={isDark ? "dark" : ""}>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+      
       <div
         className={`flex h-screen transition-all duration-300 ${
           !sidebarOpen ? "bg-center" : "bg-[center_right_-130px]"
@@ -429,25 +503,6 @@ export default function ChatPage() {
             : "bg-cover bg-[url('/light-bg.png')] text-slate-900"
         }`}
       >
-        {/* Connection Status Indicator */}
-        <div className="fixed top-4 right-4 z-50">
-          <div
-            className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-              isConnected
-                ? "bg-green-500/20 text-green-400"
-                : "bg-red-500/20 text-red-400"
-            }`}
-          >
-            <div
-              className={`w-2 h-2 rounded-full ${
-                isConnected ? "bg-green-400" : "bg-red-400"
-              }`}
-            />
-            {isConnected ? "Connected" : "Disconnected"}
-          </div>
-        </div>
-
-        {/* Sidebar */}
         <SharedSidebar
           isDark={isDark}
           onToggleTheme={toggleTheme}
@@ -605,9 +660,26 @@ const MessageBubble = ({
               : "text-slate-900"
         }`}
       >
+        {isStreaming && message.statusMessage && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex space-x-1">
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-slate-300" : "bg-slate-600"}`} style={{ animationDelay: "0ms" }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-slate-300" : "bg-slate-600"}`} style={{ animationDelay: "150ms" }} />
+              <div className={`w-2 h-2 rounded-full animate-bounce ${isDark ? "bg-slate-300" : "bg-slate-600"}`} style={{ animationDelay: "300ms" }} />
+            </div>
+            <span className={`text-sm italic ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              {message.statusMessage}
+            </span>
+          </div>
+        )}
+
         <p className="text-pretty leading-relaxed whitespace-pre-wrap">
-          {message.content}
-          {isStreaming && (
+          {message.content || (isStreaming && !message.statusMessage && (
+            <span className={`text-sm italic ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+              กำลังประมวลผล...
+            </span>
+          ))}
+          {isStreaming && message.content && (
             <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse" />
           )}
         </p>

@@ -27,6 +27,7 @@ type Config struct {
 	Database Database `envPrefix:"POSTGRES_"`
 	Redis    Redis    `envPrefix:"REDIS_"`
 	Quota    Quota    `envPrefix:"QUOTA_"`
+	AllowedOrigin []string `env:"ALLOWED_ORIGIN" envSeparator:","`
 }
 
 type JWT struct {

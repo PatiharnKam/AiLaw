@@ -13,59 +13,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// TODO: Configure allowed origins for production
-		return true
-	},
-}
-
 type Client struct {
 	conn    *websocket.Conn
 	userID  string
 	send    chan []byte
+	done    chan struct{}
 	handler *Handler
 	mu      sync.Mutex
-}
-
-// WebSocket Message Types
-type WSMessage struct {
-	Type      string `json:"type"`
-	SessionID string `json:"sessionId,omitempty"`
-	Content   string `json:"content,omitempty"`
-	ModelType string `json:"modelType,omitempty"` // "default" or "COT"
-}
-
-type WSResponse struct {
-	Type           string     `json:"type"`
-	Content        string     `json:"content,omitempty"`
-	SessionID      string     `json:"sessionId,omitempty"`
-	ModelMessageID string     `json:"modelMessageId,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Usage          *UsageInfo `json:"usage,omitempty"`
-
-	// COT specific fields
-	Steps       []string `json:"steps,omitempty"`
-	Rationale   string   `json:"rationale,omitempty"`
-	CurrentStep int      `json:"currentStep,omitempty"`
-	TotalSteps  int      `json:"totalSteps,omitempty"`
-	StepDesc    string   `json:"stepDescription,omitempty"`
-	Status      string   `json:"status,omitempty"`
-}
-
-type UsageInfo struct {
-	InputTokens  int   `json:"inputTokens"`
-	OutputTokens int   `json:"outputTokens"`
-	TotalTokens  int   `json:"totalTokens"`
-	Remaining    int64 `json:"remaining"`
+	closed  bool
 }
 
 func (h *Handler) WebSocketHandler(c *gin.Context) {
 	logger := slog.Default()
 
-	// ดึง userId จาก context ที่ middleware set ไว้
 	userID := c.GetString("userId")
 	if userID == "" {
 		logger.Error("WebSocket: unauthorized - no user ID from middleware")
@@ -74,6 +34,21 @@ func (h *Handler) WebSocketHandler(c *gin.Context) {
 			Message: app.UnauthorizedErrorMessage,
 		})
 		return
+	}
+
+	var upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			allowedOrigins := h.cfg.AllowedOrigin
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					return true
+				}
+			}
+			return false
+		},
 	}
 
 	// Upgrade HTTP connection to WebSocket
@@ -87,6 +62,7 @@ func (h *Handler) WebSocketHandler(c *gin.Context) {
 		conn:    conn,
 		userID:  userID,
 		send:    make(chan []byte, 256),
+		done:    make(chan struct{}),
 		handler: h,
 	}
 
@@ -99,17 +75,15 @@ func (h *Handler) WebSocketHandler(c *gin.Context) {
 func (c *Client) readPump() {
 	logger := slog.Default()
 	defer func() {
-		c.conn.Close()
+		c.mu.Lock()
+		c.closed = true
+		close(c.done)
+		c.mu.Unlock()
+
 		close(c.send)
+		c.conn.Close()
 		logger.Info("WebSocket disconnected", "userId", c.userID)
 	}()
-
-	c.conn.SetReadLimit(512 * 1024) // 512KB
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
 
 	for {
 		_, message, err := c.conn.ReadMessage()
@@ -169,6 +143,18 @@ func (c *Client) handleChatMessage(msg WSMessage) {
 	logger := slog.Default()
 	ctx := context.Background()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Monitor done channel
+	go func() {
+		select {
+		case <-c.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
 	if msg.SessionID == "" || msg.Content == "" {
 		c.sendError("invalid_request", "sessionId and content are required")
 		return
@@ -218,41 +204,40 @@ func (c *Client) handleChatMessage(msg WSMessage) {
 			wsResp.Content = event.Text
 		case "error":
 			wsResp.Type = "error"
-			wsResp.Error = event.Error
+			wsResp.Error = &WSError{
+				Code:    "model_error",
+				Message: event.Error,
+			}
 		default:
 			return
 		}
 		c.sendResponse(wsResp)
 	}
 
-	var resp *StreamingMessageResponse
-	var err error
-
-	resp, err = c.handler.service.ChatbotProcessWithStream(ctx, req, streamCallback)
+	resp, err := c.handler.service.ChatbotProcessWithStream(ctx, req, streamCallback)
 	if err != nil {
 		logger.Error("Chat process error", "error", err.Error())
-		c.sendError("process_error", err.Error())
+		c.sendError(resp.Code, resp.Message)
 		return
 	}
 
-	// Send completion
+	respData := resp.Data.(StreamingMessageResponse)
+
 	c.sendResponse(WSResponse{
 		Type:           "done",
 		SessionID:      msg.SessionID,
-		ModelMessageID: resp.ModelMessageID,
-		Content:        resp.Message,
-		Usage: &UsageInfo{
-			InputTokens:  resp.InputTokens,
-			OutputTokens: resp.OutputTokens,
-			TotalTokens:  resp.TotalTokens,
-			Remaining:    resp.Remaining,
-		},
+		ModelMessageID: respData.ModelMessageID,
+		Content:        respData.Message,
 	})
 }
 
 func (c *Client) sendResponse(resp WSResponse) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.closed {
+		return
+	}
 
 	data, err := json.Marshal(resp)
 	if err != nil {
@@ -269,7 +254,10 @@ func (c *Client) sendResponse(resp WSResponse) {
 
 func (c *Client) sendError(code, message string) {
 	c.sendResponse(WSResponse{
-		Type:  "error",
-		Error: message,
+		Type: "error",
+		Error: &WSError{
+			Code:    code,
+			Message: message,
+		},
 	})
 }

@@ -5,6 +5,9 @@ import Image from "next/image"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useModelType } from "@/hooks/useModelType"
+import { useToast } from "@/hooks/useToast"
+import { ToastContainer } from "@/components/toast"
+import { parseApiError } from "@/utils/errorMapping"
 import { SharedSidebar } from "@/components/shared-sidebar"
 import { ChatInput } from "@/components/chat-input"
 import { useAuth } from "../providers"
@@ -22,6 +25,7 @@ export default function WelcomePage() {
   const { setPrompt } = usePrompt()
   const initializedRef = useRef(false)
   const isRefreshingRef = useRef(false)
+  const { toasts, removeToast, showError } = useToast()
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("chatbot-theme")
@@ -98,7 +102,10 @@ export default function WelcomePage() {
       }
     }
 
-    if (!res.ok) throw new Error(data.message || "API request failed")
+    if (!res.ok) {
+      throw data
+    }
+    
     return data
   }, [getToken, refreshToken, logout])
 
@@ -122,13 +129,18 @@ export default function WelcomePage() {
       const chatId = data.data
       setPrompt(prompt)
       router.push(`/chat/${chatId}`)
-    } catch (error) {
-      console.error("Create session error:", error)
+    } catch (error: any) {
+      const errorInfo = parseApiError(error)
+      showError(errorInfo.title, errorInfo.message)
+      router.push("/welcome")
     }
   }
 
   return (
     <div className={isDark ? "dark" : ""}>
+      {/* 🎯 Toast Container */}
+      <ToastContainer toasts={toasts} onClose={removeToast} />
+      
       <div
         className={`flex min-h-screen transition-all duration-300 ${
           !sidebarOpen ? 'bg-center' : 'bg-[center_right_-130px]'
