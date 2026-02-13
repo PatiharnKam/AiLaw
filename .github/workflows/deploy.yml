@@ -27,7 +27,7 @@ jobs:
             
             # Run docker-compose
             docker-compose down || true
-            docker-compose build --no-cache frontend
+            docker-compose build --no-cache frontend backend
             docker-compose up -d
         env:
           BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
