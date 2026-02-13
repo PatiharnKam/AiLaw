@@ -10,6 +10,7 @@ import (
 func InitConfig() (*Config, error) {
 	if err := godotenv.Load(); err != nil {
 		slog.Error("No .env file found or error loading .env file")
+		return nil, err
 	}
 
 	cfg := Config{}
