@@ -29,7 +29,7 @@ interface Chat {
   messages: Message[]
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 
 export default function ChatPage() {
   const router = useRouter()
