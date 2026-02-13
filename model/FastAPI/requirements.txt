@@ -9,8 +9,9 @@ langchain-text-splitters
 runpod==1.7.1
 pdfplumber 
 pdfminer
-
 groq
 fastapi
 pydantic
+json_repair
 uvicorn
+uvloop
