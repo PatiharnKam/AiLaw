@@ -8,6 +8,7 @@ import { useModelType } from "@/hooks/useModelType"
 import { useWebSocket, WSResponse } from "@/hooks/useWebSocket"
 import { useToast } from "@/hooks/useToast"
 import { ToastContainer } from "@/components/toast"
+import { FeedbackDetail } from "@/components/feedback"
 import { parseApiError, parseWSError } from "@/utils/errorMapping"
 import { SharedSidebar } from "@/components/shared-sidebar"
 import { ChatInput } from "@/components/chat-input"
@@ -51,6 +52,9 @@ export default function ChatPage() {
   const streamingMessageIdRef = useRef<string | null>(null)
   const { toasts, removeToast, showError } = useToast()
   const pendingMessageRef = useRef<string>("")
+  const [feedbackDetailOpen, setFeedbackDetailOpen] = useState(false)
+  const [feedbackType, setFeedbackType] = useState<"like" | "dislike" | null>(null)
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
 
   // ============ WebSocket Setup ============
   const handleChunk = useCallback((content: string, sessionId: string) => {
@@ -73,7 +77,6 @@ export default function ChatPage() {
   }, [])
 
   const handleStatus = useCallback((status: string) => {
-    console.log("📊 Status:", status)
     
     setChat(prev => {
       if (!prev) return prev
@@ -326,6 +329,7 @@ export default function ChatPage() {
     if (!sent) {
       await sendMessageHTTP(messageContent, tempUserId, tempModelId)
     }
+    // await sendMessageHTTP(messageContent, tempUserId, tempModelId)
   }, [chatId, modelType, isSending, sendChat])
 
   // Fallback HTTP send (if WebSocket fails)
@@ -404,11 +408,25 @@ export default function ChatPage() {
     navigator.clipboard.writeText(content)
   }
 
-  const handleLike = useCallback(async (messageId: string) => {
-    const currentMessage = chat?.messages.find(m => m.messageId === messageId)
+  const handleLike = useCallback((messageId: string) => {
+    setSelectedMessageId(messageId)
+    setFeedbackType("like")
+    setFeedbackDetailOpen(true)
+  }, [])
+
+  const handleDislike = useCallback((messageId: string) => {
+    setSelectedMessageId(messageId)
+    setFeedbackType("dislike")
+    setFeedbackDetailOpen(true)
+  }, [])
+
+  const handleFeedbackSubmit = useCallback(async (feedbackDetail: string) => {
+    if (!selectedMessageId || !feedbackType) return
+
+    const currentMessage = chat?.messages.find(m => m.messageId === selectedMessageId)
     if (!currentMessage) return
 
-    const newFeedback = currentMessage.feedback === 1 ? null : 1
+    const newFeedback = feedbackType === "like" ? 1 : -1
 
     try {
       setChat(prev => {
@@ -416,18 +434,20 @@ export default function ChatPage() {
         return {
           ...prev,
           messages: prev.messages.map(msg =>
-            msg.messageId === messageId
+            msg.messageId === selectedMessageId
               ? { ...msg, feedback: newFeedback }
               : msg
           ),
         }
       })
 
-      await apiFetch(`/api/feedback/${messageId}`, {
+      await apiFetch(`/api/feedback/${selectedMessageId}`, {
         method: "PATCH",
-        body: JSON.stringify({ feedback: newFeedback }),
+        body: JSON.stringify({ 
+          feedback: newFeedback,
+          feedbackDetail: feedbackDetail || undefined
+        }),
       })
-      
     } catch (error: any) {
       const errorInfo = parseApiError(error)
       showError(errorInfo.title, errorInfo.message)
@@ -437,62 +457,37 @@ export default function ChatPage() {
         return {
           ...prev,
           messages: prev.messages.map(msg =>
-            msg.messageId === messageId
+            msg.messageId === selectedMessageId
               ? { ...msg, feedback: currentMessage.feedback }
               : msg
           ),
         }
       })
+    } finally {
+      setFeedbackDetailOpen(false)
+      setSelectedMessageId(null)
+      setFeedbackType(null)
     }
-  }, [apiFetch, chat?.messages, showError])
-
-  const handleDislike = useCallback(async (messageId: string) => {
-    const currentMessage = chat?.messages.find(m => m.messageId === messageId)
-    if (!currentMessage) return
-
-    const newFeedback = currentMessage.feedback === -1 ? null : -1
-
-    try {
-      setChat(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          messages: prev.messages.map(msg =>
-            msg.messageId === messageId
-              ? { ...msg, feedback: newFeedback }
-              : msg
-          ),
-        }
-      })
-
-      await apiFetch(`/api/feedback/${messageId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ feedback: newFeedback }),
-      })
-      
-    } catch (error: any) {
-      const errorInfo = parseApiError(error)
-      showError(errorInfo.title, errorInfo.message)
-      
-      setChat(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          messages: prev.messages.map(msg =>
-            msg.messageId === messageId
-              ? { ...msg, feedback: currentMessage.feedback }
-              : msg
-          ),
-        }
-      })
-    }
-  }, [apiFetch, chat?.messages, showError])
+  }, [selectedMessageId, feedbackType, chat?.messages, apiFetch, showError])
 
   if (!chat) return null
 
   return (
     <div className={isDark ? "dark" : ""}>
       <ToastContainer toasts={toasts} onClose={removeToast} />
+      
+      {/* 🎯 Feedback Modal */}
+      <FeedbackDetail
+        isOpen={feedbackDetailOpen}
+        onClose={() => {
+          setFeedbackDetailOpen(false)
+          setSelectedMessageId(null)
+          setFeedbackType(null)
+        }}
+        onSubmit={handleFeedbackSubmit}
+        feedbackType={feedbackType}
+        isDark={isDark}
+      />
       
       <div
         className={`flex h-screen transition-all duration-300 ${

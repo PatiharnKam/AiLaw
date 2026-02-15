@@ -41,6 +41,10 @@ export function ChatInput({
     }
   }, [isDropdownOpen])
 
+  const getDisplayName = (type: "NORMAL" | "COT") => {
+    return type === "COT" ? "REASONING" : "NORMAL"
+  }
+
   return (
     <div className="p-4">
       <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
@@ -94,7 +98,7 @@ export function ChatInput({
                     : "text-slate-700 hover:bg-gray-100"
                 }`}
               >
-                <span>{modelType}</span>
+                <span>{getDisplayName(modelType)}</span>
                 <svg 
                   className={`h-4 w-4 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} 
                   fill="none" 
@@ -182,7 +186,7 @@ export function ChatInput({
                       </svg>
                     </div>
                     <div className="flex-1 text-left">
-                      <div className="font-semibold">COT</div>
+                      <div className="font-semibold">REASONING</div>
                       <div className={`text-xs mt-0.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                         Chain of Thought reasoning
                       </div>

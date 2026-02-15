@@ -21,7 +21,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
-        {/* <div className="fixed inset-0 -z-10 bg-cover bg-center bg-no-repeat bg-[url('/bg.jpg')] opacity-30"></div> */}
         <AuthProvider>
           <PromptProvider>
             <Suspense fallback={null}>{children}</Suspense>

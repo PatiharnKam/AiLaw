@@ -18,10 +18,11 @@ func NewStorage(db *pgxpool.Pool) *Storage {
 func (s *Storage) FeedbackStorage(ctx context.Context, req FeedbackRequest) error {
 	query := `
 		UPDATE model_messages
-		SET feedback = $1
-		WHERE message_id = $2
+		SET feedback = $1,
+			feedback_detail = $2
+		WHERE message_id = $3
 	`
-	rows, err := s.db.Exec(ctx, query, &req.Feedback, req.MessageID)
+	rows, err := s.db.Exec(ctx, query, &req.Feedback, &req.FeedbackDetail, req.MessageID)
 	if err != nil {
 		return err
 	}
