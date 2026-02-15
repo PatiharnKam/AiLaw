@@ -57,9 +57,6 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 		}, fmt.Errorf("failed to check quota: %w", err)
 	}
 
-	fmt.Println()
-	slog.Info("quota status", "status", quotaStatus)
-
 	if quotaStatus.IsExceeded {
 		return app.Response{
 			Code:    app.QuotaExceededErrorCode,
@@ -113,10 +110,6 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 	if err != nil {
 		slog.Error("failed to consume tokens", "error", err)
 	}
-
-	fmt.Println()
-	slog.Info("resp is", "response", resp)
-	fmt.Println()
 
 	return app.Response{
 		Code:    app.SUCCESS_CODE,

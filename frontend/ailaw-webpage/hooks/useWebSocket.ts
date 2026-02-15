@@ -120,18 +120,12 @@ export function useWebSocket(
           case "guard_passed":
             break
           case "status":
-            console.log("status is :",data.status)
             if (data.status) opts.onStatus?.(data.status)
             break
           case "plan":
-            // console.log("plan step :",data.steps)
-            // console.log("rationale step :",data.rationale)
             if (data.steps) opts.onPlan?.(data.steps, data.rationale || "")
             break
           case "cot_step":
-            console.log("Current steps :",data.currentStep)
-            console.log("Total steps :",data.totalSteps)
-            // console.log("Step Description :",data.stepDescription)
             if (data.currentStep !== undefined && data.totalSteps !== undefined) {
               opts.onCotStep?.(data.currentStep, data.totalSteps, data.stepDescription || "")
             }

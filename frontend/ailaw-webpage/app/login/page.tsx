@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "../providers"
+import { TermsOfService } from "@/components/tos"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 
@@ -14,17 +15,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
+  const [tosOpen, setTosOpen] = useState(false)
+  const [hasAcceptedTos, setHasAcceptedTos] = useState(false)
 
-  // เมื่อ Google redirect กลับมาพร้อม code
   useEffect(() => {
     const code = searchParams.get("code")
     if (code) {
-      console.log("OAuth code received:", code)
       exchangeCodeForToken(code)
     }
   }, [searchParams])
 
-  // ส่ง code กลับไป backend เพื่อแลก accessToken
+  useEffect(() => {
+    const tosAccepted = localStorage.getItem("tos-accepted")
+    if (tosAccepted === "true") {
+      setHasAcceptedTos(true)
+    } else {
+      setTosOpen(true)
+    }
+  }, [])
+
   const exchangeCodeForToken = async (code: string) => {
     try {
       setIsLoading(true)
@@ -34,7 +43,7 @@ export default function LoginPage() {
       })
 
       if (!res.ok) {
-        throw new Error("Failed to exchange code for token")
+        throw new Error("Authentication failed. Please try again.")
       }
 
       const data = await res.json()
@@ -45,21 +54,29 @@ export default function LoginPage() {
       setAccessToken(accessToken)
       router.replace("/welcome")
     } catch (err: any) {
-      setError(err.message || "Authentication failed")
+      setError(err.message || "Authentication failed. Please try again.")
       router.replace("/login")
     } finally {
       setIsLoading(false)
     }
   }
 
-  // กด Continue → เริ่ม flow Google OAuth
   const handleContinue = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!hasAcceptedTos) {
+      setTosOpen(true)
+      return
+    }
+    
     if (email) handleGoogleLogin(email)
   }
 
-  // เปิดหน้า login ของ Google (เริ่ม OAuth)
   const handleGoogleLogin = (emailHint?: string) => {
+    if (!hasAcceptedTos) {
+      setTosOpen(true)
+      return
+    }
+    
     setIsLoading(true)
     const url = emailHint
       ? `${API_BASE_URL}/auth/google/login?email=${encodeURIComponent(emailHint)}`
@@ -67,8 +84,19 @@ export default function LoginPage() {
 
     window.location.href = url
   }
+  const handleAcceptTos = () => {
+    setHasAcceptedTos(true)
+    localStorage.setItem("tos-accepted", "true")
+    setTosOpen(false)
+  }
 
-    return (
+  return (
+    <>
+      <TermsOfService
+        isOpen={tosOpen}
+        onAccept={handleAcceptTos}
+      />
+      
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="w-full max-w-md space-y-6 px-8">
           <div className="text-center">
@@ -79,6 +107,12 @@ export default function LoginPage() {
           {error && (
             <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">
               {error}
+            </div>
+          )}
+
+          {!hasAcceptedTos && (
+            <div className="rounded-xl bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-800">
+              ⚠️ คุณต้องยอมรับเงื่อนไขการให้บริการก่อนเข้าสู่ระบบ
             </div>
           )}
 
@@ -111,7 +145,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={handleContinue}
-                  disabled={isLoading || !email}
+                  disabled={isLoading || !email || !hasAcceptedTos}
                   className="w-full rounded-xl bg-black px-4 py-3 font-semibold text-white transition-colors hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Continue
@@ -126,7 +160,7 @@ export default function LoginPage() {
 
               <button
                 onClick={() => handleGoogleLogin()}
-                disabled={isLoading}
+                disabled={isLoading || !hasAcceptedTos}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-300 bg-white px-4 py-3 font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -154,16 +188,16 @@ export default function LoginPage() {
 
           <div className="text-center">
             <p className="text-sm text-gray-500">
-              <a href="#" className="hover:underline">
+              <button
+                onClick={() => setTosOpen(true)}
+                className="hover:underline focus:outline-none"
+              >
                 Terms of Service
-              </a>
-              {" | "}
-              <a href="#" className="hover:underline">
-                Privacy Policy
-              </a>
+              </button>
             </p>
           </div>
         </div>
       </div>
-    )
-  }
+    </>
+  )
+}

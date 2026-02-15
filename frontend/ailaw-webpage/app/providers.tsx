@@ -22,8 +22,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // wrapped setter
   const setAccessToken = (token: string | null) => {
-    accessTokenRef.current = token     // ป้องกัน stale token
-    setAccessTokenState(token)         // update UI
+    accessTokenRef.current = token
+    setAccessTokenState(token)
   }
 
   const getToken = () => accessTokenRef.current
@@ -60,11 +60,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!newAccessToken) throw new Error("Access token not found")
 
       accessTokenRef.current = newAccessToken
-      setAccessTokenState(newAccessToken) // update UI only (no loops)
+      setAccessTokenState(newAccessToken)
 
       return true
     } catch (error) {
-      console.error("Failed to refresh token:", error)
+
       return false
     }
   }
