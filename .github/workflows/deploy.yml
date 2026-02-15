@@ -10,21 +10,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # create .env
-      - name: Create env files
-        run: |
-          echo "${{ secrets.BACKEND_ENV }}" > backend/.env
-          echo "${{ secrets.FRONTEND_ENV }}" > frontend/ailaw-webpage/.env
-          echo "${{ secrets.MODEL_ENV }}" > model/FastAPI/.env
-      
-      # Deploy
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: BACKEND_ENV,FRONTEND_ENV,MODEL_ENV
           script: |
-            cd /app
-            git pull
-            # restart services
+            cd /home/ubuntu/AiLaw
+            git pull origin main
+            
+            echo "$BACKEND_ENV" > backend/.env
+            echo "$FRONTEND_ENV" > frontend/ailaw-webpage/.env
+            echo "$MODEL_ENV" > model/FastAPI/.env
+            
+            # Run docker-compose
+            docker-compose down || true
+            docker-compose up -d --build
+        env:
+          BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+          FRONTEND_ENV: ${{ secrets.FRONTEND_ENV }}
+          MODEL_ENV: ${{ secrets.MODEL_ENV }}
