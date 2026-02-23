@@ -1,4 +1,6 @@
 import json
+import re
+import pathlib
 import tiktoken
 import httpx
 import asyncio
@@ -192,3 +194,15 @@ async def chunked_safety_scan(client, model_name: str, long_text: str):
           return is_safe, result_msg
 
       return True, "Guard Layer 2 : All chunks are Safe."
+
+
+# Load law data once at module level — avoids repeated I/O per request
+_LAW_JSON_PATH = pathlib.Path(__file__).parent / "data" / "law.json"
+with open(_LAW_JSON_PATH, encoding="utf-8") as _f:
+    _LAW_DATA: dict = json.load(_f)
+
+def extract_law_articles(question: str) -> list[str]:
+    """Return article texts for all article numbers explicitly mentioned in the question."""
+    numbers = re.findall(r'มาตรา(?:ที่)?\s*(\d+)', question)
+    # Deduplicate while preserving order, skip missing entries
+    return [_LAW_DATA[n] for n in dict.fromkeys(numbers) if n in _LAW_DATA]
