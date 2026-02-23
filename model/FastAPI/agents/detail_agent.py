@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os, json
 from copy import deepcopy
-from .utils  import get_chatbot_response, get_embedding, get_closest_result, get_chatbot_full_response
+from .utils  import get_chatbot_response, get_embedding, get_closest_result, get_chatbot_full_response, extract_law_articles
 from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_SYSTEM_PROMTPS
 from openai import AsyncOpenAI
 from pinecone import Pinecone
@@ -159,6 +159,12 @@ class DetailsAgent():
             
             matches = result.get("matches", [])
             docs_str = self.get_detail(matches)
+
+            # Inject exact articles referenced in the sub-query alongside semantic results
+            pinned = extract_law_articles(response_definer['query'])
+            if pinned:
+                docs_str = "\n\n".join(pinned) + "\n\n" + docs_str
+
             self.list_docs_str.append(docs_str)
 
             QA_prompt = (
@@ -299,7 +305,12 @@ class DetailsAgent():
         # print("Detail Agent : Get Content from Vector database")
         matches = result.get("matches", [])
         docs_str = self.get_detail(matches)
-        
+
+        # Prepend exact article lookups so LLM always sees explicitly requested sections
+        pinned = extract_law_articles(question)
+        if pinned:
+            docs_str = "\n\n".join(pinned) + "\n\n" + docs_str
+
         detail_content = f"""
             Question:
             {question}

@@ -7,7 +7,8 @@ from .utils import (
     get_chatbot_response,
     get_chatbot_full_response_stream,
     get_embedding,
-    get_closest_result
+    get_closest_result,
+    extract_law_articles
 )
 from .prompts import PLANNER_SYSTEM_PROMPT, STEP_DEFINER_SYSTEM_PROMPT, DETAIL_STREAMING_SYSTEM_PROMTPS
 from openai import AsyncOpenAI
@@ -116,6 +117,11 @@ class DetailsAgentStreaming:
         # print("Detail Agent : Get Content from Vector database")
         matches = result.get("matches", [])
         docs_str = self.get_detail(matches)
+
+        # Prepend exact article lookups so LLM always sees explicitly requested sections
+        pinned = extract_law_articles(question)
+        if pinned:
+            docs_str = "\n\n".join(pinned) + "\n\n" + docs_str
 
         yield {"type": "status", "message": "กำลังวิเคราะห์และสร้างคำตอบ..."}
 
@@ -253,6 +259,12 @@ class DetailsAgentStreaming:
 
             matches = result.get("matches", [])
             docs_str = self.get_detail(matches)
+
+            # Inject exact articles referenced in the sub-query alongside semantic results
+            pinned = extract_law_articles(response_definer['query'])
+            if pinned:
+                docs_str = "\n\n".join(pinned) + "\n\n" + docs_str
+
             self.list_docs_str.append(docs_str)
 
             # print(f"COT QA : {index+1}")
