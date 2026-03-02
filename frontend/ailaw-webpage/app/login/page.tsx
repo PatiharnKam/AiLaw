@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "../providers"
 import { TermsOfService } from "@/components/tos"
@@ -17,6 +17,7 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [tosOpen, setTosOpen] = useState(false)
   const [hasAcceptedTos, setHasAcceptedTos] = useState(false)
+  const pendingActionRef = useRef<{ type: 'email' | 'google', emailHint?: string } | null>(null)
 
   useEffect(() => {
     const code = searchParams.get("code")
@@ -29,8 +30,6 @@ export default function LoginPage() {
     const tosAccepted = localStorage.getItem("tos-accepted")
     if (tosAccepted === "true") {
       setHasAcceptedTos(true)
-    } else {
-      setTosOpen(true)
     }
   }, [])
 
@@ -61,22 +60,35 @@ export default function LoginPage() {
     }
   }
 
-  const handleContinue = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!hasAcceptedTos) {
-      setTosOpen(true)
-      return
-    }
-    
-    if (email) handleGoogleLogin(email)
+  const isValidEmail = (email: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   }
 
-  const handleGoogleLogin = (emailHint?: string) => {
+  const handleContinue = () => {
+    if (!isValidEmail(email)) {                                                                                             
+      setError("Please enter a valid email address.")                                                                       
+      return                                                                                                                
+    }                                                                                                                       
+    setError("")   
     if (!hasAcceptedTos) {
+      pendingActionRef.current = { type: 'email', emailHint: email }
       setTosOpen(true)
       return
     }
     
+    proceedToGoogleLogin(email)
+  }
+
+  const handleGoogleLogin = () => {
+    if (!hasAcceptedTos) {
+      pendingActionRef.current = { type: 'google' }
+      setTosOpen(true)
+      return
+    }
+    
+    proceedToGoogleLogin()
+  }
+  const proceedToGoogleLogin = (emailHint?: string) => {
     setIsLoading(true)
     const url = emailHint
       ? `${API_BASE_URL}/auth/google/login?email=${encodeURIComponent(emailHint)}`
@@ -88,6 +100,17 @@ export default function LoginPage() {
     setHasAcceptedTos(true)
     localStorage.setItem("tos-accepted", "true")
     setTosOpen(false)
+    
+    if (pendingActionRef.current) {
+      const { type, emailHint } = pendingActionRef.current
+      pendingActionRef.current = null
+      
+      if (type === 'email') {
+        proceedToGoogleLogin(emailHint)
+      } else if (type === 'google') {
+        proceedToGoogleLogin()
+      }
+    }
   }
 
   return (
@@ -109,13 +132,6 @@ export default function LoginPage() {
               {error}
             </div>
           )}
-
-          {!hasAcceptedTos && (
-            <div className="rounded-xl bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-800">
-              ⚠️ คุณต้องยอมรับเงื่อนไขการให้บริการก่อนเข้าสู่ระบบ
-            </div>
-          )}
-
           {/* Loading State */}
           {isLoading ? (
             <div className="flex flex-col items-center justify-center space-y-4 py-8">
@@ -131,9 +147,9 @@ export default function LoginPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    onKeyPress={(e) => {
+                    onKeyDown={(e) => {
                       if (e.key === "Enter" && email) {
-                        handleContinue(e)
+                        handleContinue()
                       }
                     }}
                     className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
@@ -145,7 +161,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={handleContinue}
-                  disabled={isLoading || !email || !hasAcceptedTos}
+                  disabled={isLoading || !email}
                   className="w-full rounded-xl bg-black px-4 py-3 font-semibold text-white transition-colors hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Continue
@@ -159,8 +175,8 @@ export default function LoginPage() {
               </div>
 
               <button
-                onClick={() => handleGoogleLogin()}
-                disabled={isLoading || !hasAcceptedTos}
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-300 bg-white px-4 py-3 font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -181,7 +197,7 @@ export default function LoginPage() {
                     d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                   />
                 </svg>
-                Continue with google
+                Continue with Google
               </button>
             </>
           )}
