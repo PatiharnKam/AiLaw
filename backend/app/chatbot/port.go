@@ -38,7 +38,7 @@ type ModelMessageDetail struct {
 	TotalOutputTokens int     `json:"totalOutputTokens"`
 	FinalOutputTokens int     `json:"finalOutputTokens"`
 	TotalUsedTokens   int     `json:"totalUsedTokens"`
-	ResponseTime      *int    `json:"responseTime"`
+	ResponseTime      *float64 `json:"responseTime"`
 }
 
 type GetMessageResponse struct {

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/PatiharnKam/AiLaw/app"
 	"github.com/google/uuid"
@@ -58,7 +59,7 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 		ModelType: req.ModelType,
 	}
 
-	err = s.callFastAPIStream(ctx, req, modelURL, func(event StreamEvent) {
+	responseTime, err := s.callFastAPIStream(ctx, req, modelURL, func(event StreamEvent) {
 		switch event.Type {
 		case "content":
 			modelMessageDetail.Content += event.Text
@@ -82,6 +83,7 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 			err = fmt.Errorf("model error: %s", event.Error)
 		}
 	})
+	modelMessageDetail.ResponseTime = responseTime
 
 	if err != nil {
 		return app.Response{
@@ -128,7 +130,7 @@ func (s *MessageService) callFastAPIStream(
 	req ChatbotProcessRequest,
 	modelURL string,
 	onEvent func(StreamEvent),
-) error {
+) (*float64, error) {
 	// Build request body
 	data := ChatbotRequest{
 		Messages: []Messages{
@@ -141,12 +143,13 @@ func (s *MessageService) callFastAPIStream(
 
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("error marshaling JSON: %w", err)
+		return nil, fmt.Errorf("error marshaling JSON: %w", err)
 	}
 
+	callStart := time.Now()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", modelURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("error creating request: %w", err)
+		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -155,13 +158,13 @@ func (s *MessageService) callFastAPIStream(
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("error calling API: %w", err)
+		return nil, fmt.Errorf("error calling API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse SSE stream
@@ -172,7 +175,7 @@ func (s *MessageService) callFastAPIStream(
 			if err == io.EOF {
 				break
 			}
-			return fmt.Errorf("error reading stream: %w", err)
+			return nil, fmt.Errorf("error reading stream: %w", err)
 		}
 
 		line = strings.TrimSpace(line)
@@ -202,5 +205,6 @@ func (s *MessageService) callFastAPIStream(
 		}
 	}
 
-	return nil
+	responseTime := time.Since(callStart).Seconds()
+	return &responseTime, nil
 }

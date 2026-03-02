@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/PatiharnKam/AiLaw/app"
 	"github.com/PatiharnKam/AiLaw/app/quota"
@@ -72,7 +73,7 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 		}, fmt.Errorf("error when update last message at session : %w", err)
 	}
 
-	resp, err := s.callChatbot(ctx, req)
+	resp, responseTime, err := s.callChatbot(ctx, req)
 	if err != nil {
 		return app.Response{
 			Code:    app.InternalServerErrorCode,
@@ -96,8 +97,11 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 		TotalOutputTokens: resp.TotalOutputTokens,
 		FinalOutputTokens: resp.FinalOutputTokens,
 		TotalUsedTokens:   resp.TotalUsedTokens,
+		ResponseTime:      responseTime,
 	}
-
+	fmt.Println()
+	fmt.Println(modelmessageDetail.ResponseTime)
+	fmt.Println()
 	err = s.storage.SaveModelMessage(ctx, req.UserId, req.SessionId, modelMessageId, modelmessageDetail)
 	if err != nil {
 		return app.Response{
@@ -121,7 +125,7 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 	}, nil
 }
 
-func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessRequest) (*ChatbotResponse, error) {
+func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessRequest) (*ChatbotResponse, *float64, error) {
 
 	data := ChatbotRequest{
 		Messages: []Messages{
@@ -134,7 +138,7 @@ func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessRequ
 
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return nil, fmt.Errorf("Error marshaling JSON: %w", err)
+		return nil, nil, fmt.Errorf("Error marshaling JSON: %w", err)
 	}
 
 	modelURL := s.cfg.Model.ModelURL
@@ -142,32 +146,34 @@ func (s *MessageService) callChatbot(ctx context.Context, req ChatbotProcessRequ
 		modelURL = s.cfg.Model.ModelCOTURL
 	}
 
+	callStart := time.Now()
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", modelURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("error when creating API request: %w", err)
+		return nil, nil, fmt.Errorf("error when creating API request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.cfg.Model.ModelAPIkey)
 
 	httpResp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("error whell calling API Model : %w", err)
+		return nil, nil, fmt.Errorf("error whell calling API Model : %w", err)
 	}
 	defer httpResp.Body.Close()
+	responseTime := time.Since(callStart).Seconds()
 
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", httpResp.StatusCode)
+		return nil, nil, fmt.Errorf("API request failed with status: %d", httpResp.StatusCode)
 	}
 
 	httpRespBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading response body from model: %w", err)
+		return nil, nil, fmt.Errorf("error reading response body from model: %w", err)
 	}
 
 	var response ChatbotResponse
 	if err := json.Unmarshal(httpRespBody, &response); err != nil {
-		return nil, fmt.Errorf("error unmarshaling response: %w", err)
+		return nil, nil, fmt.Errorf("error unmarshaling response: %w", err)
 	}
 
-	return &response, nil
+	return &response, &responseTime, nil
 }
