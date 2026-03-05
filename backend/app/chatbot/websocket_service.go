@@ -59,6 +59,7 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 		ModelType: req.ModelType,
 	}
 
+	var modelErr error
 	responseTime, err := s.callFastAPIStream(ctx, req, modelURL, func(event StreamEvent) {
 		switch event.Type {
 		case "content":
@@ -80,12 +81,12 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 			}
 		case "error":
 			logger.Error("stream error", "error", event.Error)
-			err = fmt.Errorf("model error: %s", event.Error)
+			modelErr = fmt.Errorf("model error: %s", event.Error)
 		}
 	})
 	modelMessageDetail.ResponseTime = responseTime
 
-	if err != nil {
+	if err != nil || modelErr != nil {
 		return app.Response{
 			Code:    app.InternalServerErrorCode,
 			Message: app.InternalServerErrorMessage,

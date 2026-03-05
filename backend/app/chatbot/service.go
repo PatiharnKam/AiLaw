@@ -99,9 +99,6 @@ func (s *MessageService) ChatbotProcess(ctx context.Context, req ChatbotProcessR
 		TotalUsedTokens:   resp.TotalUsedTokens,
 		ResponseTime:      responseTime,
 	}
-	fmt.Println()
-	fmt.Println(modelmessageDetail.ResponseTime)
-	fmt.Println()
 	err = s.storage.SaveModelMessage(ctx, req.UserId, req.SessionId, modelMessageId, modelmessageDetail)
 	if err != nil {
 		return app.Response{
