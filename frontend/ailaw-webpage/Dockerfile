@@ -28,7 +28,7 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
 CMD ["node", "server.js"]
