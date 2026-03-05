@@ -34,7 +34,7 @@ async def get_chatbot_full_response_stream(
         messages=messages,
         temperature=temperature,
         top_p=0.1,
-        max_tokens=8192,
+        max_tokens=32768,
         stream=True,
     )
     
@@ -70,7 +70,7 @@ async def get_chatbot_response(client, model_name, messages, temperature=0):
         messages=messages,
         temperature=temperature,
         top_p=0.1,
-        max_tokens=8192,
+        max_tokens=32768,
         response_format={"type": "json_object"}
     )
 
@@ -87,7 +87,7 @@ async def get_chatbot_full_response(client, model_name, messages, temperature=0)
         messages=messages,
         temperature=temperature,
         top_p=0.1,
-        max_tokens=8192,
+        max_tokens=32768,
         response_format={"type": "json_object"}
     )
     
