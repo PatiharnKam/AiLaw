@@ -55,6 +55,9 @@ export default function ChatPage() {
   const [feedbackDetailOpen, setFeedbackDetailOpen] = useState(false)
   const [feedbackType, setFeedbackType] = useState<"like" | "dislike" | null>(null)
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // ============ WebSocket Setup ============
   const handleChunk = useCallback((content: string, sessionId: string) => {
@@ -85,7 +88,7 @@ export default function ChatPage() {
         if (m.isStreaming) {
           return {
             ...m,
-            statusMessage: status,  //status message
+            statusMessage: status,
           }
         }
         return m
@@ -165,6 +168,31 @@ export default function ChatPage() {
     onStatus: handleStatus,
   })
 
+  const isNearBottom = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return true
+    
+    const threshold = 10 
+    const position = container.scrollHeight - container.scrollTop - container.clientHeight
+    
+    return position < threshold
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current)
+    }
+    
+    const nearBottom = isNearBottom()
+    setShouldAutoScroll(nearBottom)
+    
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (isNearBottom()) {
+        setShouldAutoScroll(true)
+      }
+    }, 1000)
+  }, [isNearBottom])
+
   // ============ Initialization ============
   useEffect(() => {
     if (initializedRef.current) return
@@ -194,16 +222,18 @@ export default function ChatPage() {
     const currentMessageCount = chat?.messages?.length || 0
     
     if (currentMessageCount > previousMessageCountRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      if (shouldAutoScroll) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      }
     }
     
     previousMessageCountRef.current = currentMessageCount
-  }, [chat?.messages?.length])
+  }, [chat?.messages?.length, shouldAutoScroll])
 
   useEffect(() => {
     const streamingMessage = chat?.messages.find(m => m.isStreaming)
     
-    if (streamingMessage) {
+    if (streamingMessage && shouldAutoScroll) {
       const scrollToBottom = () => {
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -212,7 +242,7 @@ export default function ChatPage() {
       
       scrollToBottom()
     }
-  }, [chat?.messages])
+  }, [chat?.messages, shouldAutoScroll])
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("chatbot-theme")
@@ -293,6 +323,8 @@ export default function ChatPage() {
   const sendMessage = useCallback(async (messageContent: string) => {
     if (!messageContent.trim() || isSending) return
 
+    setShouldAutoScroll(true)
+
     const tempUserId = crypto.randomUUID()
     const tempModelId = crypto.randomUUID()
 
@@ -329,7 +361,6 @@ export default function ChatPage() {
     if (!sent) {
       await sendMessageHTTP(messageContent, tempUserId, tempModelId)
     }
-    // await sendMessageHTTP(messageContent, tempUserId, tempModelId)
   }, [chatId, modelType, isSending, sendChat])
 
   // Fallback HTTP send (if WebSocket fails)
@@ -476,7 +507,6 @@ export default function ChatPage() {
     <div className={isDark ? "dark" : ""}>
       <ToastContainer toasts={toasts} onClose={removeToast} />
       
-      {/* 🎯 Feedback Modal */}
       <FeedbackDetail
         isOpen={feedbackDetailOpen}
         onClose={() => {
@@ -509,7 +539,7 @@ export default function ChatPage() {
         {!sidebarOpen && (
           <button
             onClick={() => setSidebarOpen(true)}
-            className={`fixed top-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
+            className={`fixed top-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg transition-colors cursor-pointer ${
               isDark
                 ? "bg-[#3C3C3C] text-white hover:bg-[#3C3C3C]"
                 : "bg-white text-slate-900 hover:bg-[#C7CDE4] shadow-lg"
@@ -523,7 +553,11 @@ export default function ChatPage() {
 
         {/* Main Chat Area */}
         <main className="flex flex-1 flex-col overflow-hidden">
-          <div className="custom-scroll flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+          <div 
+            ref={containerRef}
+            onScroll={handleScroll}
+            className="custom-scroll flex-1 overflow-y-auto p-4 md:p-6 space-y-6"
+          >
             {chat.messages.length === 0 ? (
               <div className={`text-center py-12 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 No messages yet. Start the conversation!
