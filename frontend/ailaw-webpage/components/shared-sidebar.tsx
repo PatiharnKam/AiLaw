@@ -199,8 +199,8 @@ export function SharedSidebar({ isDark, onToggleTheme, currentChatId, isOpen, on
       )}
 
       <aside
-        className={`relative z-40 flex h-screen flex-col transition-all duration-300 ${
-          isOpen ? "w-64" : "w-0 md:w-0"
+        className={`z-40 flex h-screen flex-col transition-all duration-300 ${
+          isOpen ? "fixed md:relative w-64" : "w-0"
         } ${
           isDark 
             ? "border-r-2 border-[#FFFFFF]/10 bg-[#222222]" 
