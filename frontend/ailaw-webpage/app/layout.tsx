@@ -6,6 +6,13 @@ import "./globals.css"
 import { AuthProvider } from "./providers"
 import { PromptProvider } from "../components/prompt-context"
 
+export const metadata = {
+  title: "AILaw",
+  icons: {
+    icon: "/AiLaw.png",
+  },
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{

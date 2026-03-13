@@ -6,6 +6,7 @@ from .prompts import GUARD_SYSTEM_PROMPTS, SAFETY_TAXONOMY, USER_FRIENDLY_MESSAG
 from openai import AsyncOpenAI
 from pinecone import Pinecone
 from groq import AsyncGroq
+from together import AsyncTogether
 from json_repair import repair_json
 load_dotenv()
 
@@ -17,6 +18,9 @@ class GuardAgent():
         )
         self.client_groq = AsyncGroq(
             api_key=os.getenv("groq_api")
+        )
+        self.client_togetherai = AsyncTogether(
+            api_key=os.getenv("TOGETHERAI_API_KEY")
         )
         self.model_name = os.getenv("MODEL_NAME")
         self.model_guard = os.getenv("model_guard")
@@ -56,7 +60,7 @@ class GuardAgent():
         
         # Layer 1
         # print("Guard Layer 1 : Start .....")
-        layer1_output = await get_guard_classification(client=self.client_groq,
+        layer1_output = await get_guard_classification(client=self.client_togetherai,
                                                     model_name=self.model_guard,
                                                     text=prompt)
         is_safe, layer1_message = evaluate_safety_response(guard_output=layer1_output,

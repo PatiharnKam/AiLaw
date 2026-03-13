@@ -87,7 +87,7 @@ export function ChatInput({
           {/* Bottom Bar - Model Selector & Send Button */}
           <div className={`relative flex items-center justify-end gap-2 px-4 pb-3 pt-1`}>
             {/* Model Type Dropdown */}
-            <div className="relative z-50" ref={dropdownRef}>
+            <div className="relative z-30" ref={dropdownRef}>
               <button
                 type="button"
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -112,7 +112,7 @@ export function ChatInput({
               {/* Dropdown Menu - Positioned Outside */}
               {isDropdownOpen && (
                 <div 
-                  className={`fixed w-64 rounded-xl shadow-2xl border overflow-hidden ${
+                  className={`fixed z-30 w-64 rounded-xl shadow-2xl border overflow-hidden ${
                     isDark 
                       ? "bg-[#2A2A2A] border-[#3C3C3C]" 
                       : "bg-white border-gray-200"

@@ -3,7 +3,6 @@
 import Image from "next/image"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
 import { useAuth } from "../app/providers"
 
 interface Chat {
@@ -200,8 +199,8 @@ export function SharedSidebar({ isDark, onToggleTheme, currentChatId, isOpen, on
       )}
 
       <aside
-        className={`relative z-40 flex h-screen flex-col transition-all duration-300 ${
-          isOpen ? "w-64" : "w-0 md:w-0"
+        className={`z-40 flex h-screen flex-col transition-all duration-300 ${
+          isOpen ? "fixed md:relative w-64" : "w-0"
         } ${
           isDark 
             ? "border-r-2 border-[#FFFFFF]/10 bg-[#222222]" 
@@ -246,12 +245,12 @@ export function SharedSidebar({ isDark, onToggleTheme, currentChatId, isOpen, on
 
         {/* New Chat Button */}
         <div className="p-3">
-          <Button
+          <button
             onClick={() => {
               router.push("/welcome")
               if (window.innerWidth < 768) onToggle()
             }}
-            className={`w-full justify-start gap-3 cursor-pointer ${
+            className={`flex w-full items-center justify-start gap-3 rounded-lg px-4 py-3 font-semibold transition-all cursor-pointer ${
               isDark 
                 ? "bg-[#3C3C3C] text-white hover:bg-[#303030]" 
                 : "bg-[#485BA9] hover:bg-[#4054A6] text-white"
@@ -265,7 +264,7 @@ export function SharedSidebar({ isDark, onToggleTheme, currentChatId, isOpen, on
               className="invert"
             />
             New Chat
-          </Button>
+          </button>
         </div>
 
         {/* Chat List */}

@@ -15,3 +15,4 @@ pydantic
 json_repair
 uvicorn
 uvloop
+together
