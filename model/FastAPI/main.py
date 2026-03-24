@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import asyncio
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -8,7 +9,7 @@ sys.path.append(current_dir)
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, AsyncGenerator
+from typing import List, Optional, AsyncGenerator, Dict
 import uvicorn
 
 # Original agents
@@ -41,6 +42,12 @@ detail_agent = DetailsAgent()
 
 # Streaming agents
 detail_agent_streaming = DetailsAgentStreaming()
+
+# Cancel tracking: session_id -> asyncio.Event
+active_sessions: Dict[str, asyncio.Event] = {}
+
+class CancelRequest(BaseModel):
+    session_id: str
 
 # ---------------------------------------------------------
 # API ROUTES
@@ -134,9 +141,9 @@ async def chat_completions_stream(request: ChatRequest):
     Returns SSE stream
     """
     input_messages = [msg.model_dump() for msg in request.messages]
-    
+
     return StreamingResponse(
-        generate_sse_stream(input_messages, use_cot=False),
+        generate_sse_stream(input_messages, use_cot=False, session_id=request.session_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -153,9 +160,9 @@ async def chat_completions_cot_stream(request: ChatRequest):
     Returns SSE stream with plan steps and final answer
     """
     input_messages = [msg.model_dump() for msg in request.messages]
-    
+
     return StreamingResponse(
-        generate_sse_stream(input_messages, use_cot=True),
+        generate_sse_stream(input_messages, use_cot=True, session_id=request.session_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -169,20 +176,38 @@ async def chat_completions_cot_stream(request: ChatRequest):
 # ---------------------------------------------------------
 async def generate_sse_stream(
     messages: List[dict],
-    use_cot: bool = False
+    use_cot: bool = False,
+    session_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Generate SSE stream for chat response
     """
+    # Register cancel event for this session
+    cancel_event = asyncio.Event()
+    if session_id:
+        active_sessions[session_id] = cancel_event
+
     try:
+        # Check cancellation before guard
+        if cancel_event.is_set():
+            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
         guard_response = await guard_agent.get_response(messages)
-        
+
         decision = guard_response.get("memory", {}).get("guard_decision", "unknown")
         if "not allowed" in decision:
             content = guard_response.get("content", "ไม่สามารถตอบคำถามนี้ได้")
-            
+
             yield f"data: {json.dumps({'type': 'content', 'text': content})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0, 'full_content': content, 'guard_blocked': True})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Check cancellation after guard
+        if cancel_event.is_set():
+            yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -199,6 +224,10 @@ async def generate_sse_stream(
             stream_generator = detail_agent_streaming.get_response_non_COT_stream(user_question)
 
         async for chunk in stream_generator:
+            if cancel_event.is_set():
+                yield f"data: {json.dumps({'type': 'cancelled'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
             yield f"data: {json.dumps(chunk)}\n\n"
 
         yield "data: [DONE]\n\n"
@@ -211,6 +240,24 @@ async def generate_sse_stream(
         yield "data: [DONE]\n\n"
 
 
+    finally:
+        if session_id and session_id in active_sessions:
+            del active_sessions[session_id]
+
+
+
+# ---------------------------------------------------------
+# Cancel Endpoint
+# ---------------------------------------------------------
+
+@app.post("/v1/chat/cancel")
+async def cancel_chat(request: CancelRequest):
+    """Cancel an active streaming session"""
+    cancel_event = active_sessions.get(request.session_id)
+    if cancel_event:
+        cancel_event.set()
+        return {"status": "cancelled", "session_id": request.session_id}
+    return {"status": "not_found", "session_id": request.session_id}
 
 # ---------------------------------------------------------
 # Health Check

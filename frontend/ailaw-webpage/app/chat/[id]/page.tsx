@@ -161,11 +161,34 @@ export default function ChatPage() {
     setIsSending(false)
   }, [showError])
 
-  const { isConnected, sendChat } = useWebSocket(accessToken, {
+  const handleCancelled = useCallback(() => {
+    setChat(prev => {
+      if (!prev) return prev
+      const messages = prev.messages.map(m => {
+        if (m.isStreaming) {
+          return {
+            ...m,
+            isStreaming: false,
+            statusMessage: undefined,
+            content: m.content || "",
+          }
+        }
+        return m
+      })
+      return { ...prev, messages }
+    })
+
+    streamingMessageIdRef.current = null
+    pendingMessageRef.current = ""
+    setIsSending(false)
+  }, [])
+
+  const { isConnected, sendChat, sendCancel } = useWebSocket(accessToken, {
     onChunk: handleChunk,
     onDone: handleDone,
     onError: handleError,
     onStatus: handleStatus,
+    onCancelled: handleCancelled,
   })
 
   const isNearBottom = useCallback(() => {
@@ -435,6 +458,11 @@ export default function ChatPage() {
     sendMessage(messageToSend)
   }
 
+  const handleCancel = useCallback(() => {
+    if (!isSending) return
+    sendCancel(chatId)
+  }, [isSending, sendCancel, chatId])
+
   const handleCopy = (content: string) => {
     navigator.clipboard.writeText(content)
   }
@@ -645,6 +673,7 @@ export default function ChatPage() {
             isDark={isDark}
             modelType={modelType}
             setModelType={setModelType}
+            onCancel={handleCancel}
           />
         </main>
       </div>

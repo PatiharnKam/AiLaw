@@ -12,6 +12,7 @@ interface ChatInputProps {
   modelType: "NORMAL" | "COT"
   setModelType: (type: "NORMAL" | "COT") => void
   placeholder?: string
+  onCancel?: () => void
 }
 
 export function ChatInput({
@@ -22,7 +23,8 @@ export function ChatInput({
   isDark,
   modelType,
   setModelType,
-  placeholder = "Type your message..."
+  placeholder = "Type your message...",
+  onCancel,
 }: ChatInputProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -201,28 +203,48 @@ export function ChatInput({
               )}
             </div>
 
-            {/* Send Button */}
-            <button
-              type="submit"
-              disabled={!input.trim() || isSending}
-              className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                input.trim() && !isSending
-                  ? isDark 
-                    ? "bg-[#F3F3F3] hover:bg-white" 
-                    : "bg-[#485BA9] hover:bg-[#3d4d8f]"
-                  : isDark
-                    ? "bg-[#FFFFFF]/10"
-                    : "bg-gray-200"
-              }`}
-            >
-              <Image
-                src="/send-logo.svg"
-                width={18}
-                height={18}
-                alt="Send"
-                className={isDark ? "" : "invert"}
-              />
-            </button>
+            {/* Send / Stop Button */}
+            {isSending ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all cursor-pointer ${
+                  isDark
+                    ? "bg-[#F3F3F3] hover:bg-white"
+                    : "bg-red-500 hover:bg-red-800"
+                }`}
+              >
+                <Image
+                  src="/stop.svg"
+                  width={18}
+                  height={18}
+                  alt="Send"
+                  className={isDark ? "" : "invert"}
+                />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  input.trim()
+                    ? isDark
+                      ? "bg-[#F3F3F3] hover:bg-white"
+                      : "bg-[#485BA9] hover:bg-[#3d4d8f]"
+                    : isDark
+                      ? "bg-[#FFFFFF]/10"
+                      : "bg-gray-200"
+                }`}
+              >
+                <Image
+                  src="/send-logo.svg"
+                  width={18}
+                  height={18}
+                  alt="Send"
+                  className={isDark ? "" : "invert"}
+                />
+              </button>
+            )}
           </div>
         </div>
       </form>
