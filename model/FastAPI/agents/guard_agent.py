@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import os, json
 from copy import deepcopy
 from .utils import get_chatbot_response, evaluate_safety_response, get_guard_classification, chunked_safety_scan
-from .prompts import GUARD_SYSTEM_PROMPTS, SAFETY_TAXONOMY, USER_FRIENDLY_MESSAGES
+from .prompts import GUARD_SYSTEM_PROMPTS, SAFETY_TAXONOMY, USER_FRIENDLY_MESSAGES, INJECTION_BLOCKLIST, INJECTION_BLOCKED_MESSAGE
 from openai import AsyncOpenAI
 from pinecone import Pinecone
 from groq import AsyncGroq
@@ -46,10 +46,17 @@ class GuardAgent():
         }
         return dict_output
     
+    def check_keyword_injection(self, text: str) -> bool:
+        text_lower = text.lower().strip()
+        for keyword in INJECTION_BLOCKLIST:
+            if keyword.lower() in text_lower:
+                print(f"[Guard Layer 0] BLOCKED - Keyword detected: '{keyword}'")
+                return True
+        return False
     
     async def get_response(self, messages):
         """
-        Function to get response from LLM model (3 Layers)
+        Function to get response from LLM model (4 Layers)
         """
 
         messages = deepcopy(messages)
@@ -57,7 +64,16 @@ class GuardAgent():
             {"role": "system", "content": self.system_prompt}
         ] + messages
         prompt = input_messages[1]['content']
-        
+
+        # Layer 0 - Keyword blocklist
+        # print("Guard Layer 0 : Start .....")
+        if self.check_keyword_injection(prompt):
+            output = self.postprocess(
+                json.dumps({"decision": "not allowed", "message": INJECTION_BLOCKED_MESSAGE})
+            )
+            return output
+        # print("Guard Layer 0 : Safe.....")
+
         # Layer 1
         # print("Guard Layer 1 : Start .....")
         layer1_output = await get_guard_classification(client=self.client_togetherai,
@@ -87,6 +103,6 @@ class GuardAgent():
                                              model_name=self.model_name,
                                              messages=input_messages)
         output = self.postprocess(layer3_output)
-        # print("Guard Layer 3 : End.....")
+        print("Guard Layer 3 : End.....")
         return output
     

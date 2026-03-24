@@ -136,7 +136,7 @@ def evaluate_safety_response(guard_output: str, SAFETY_TAXONOMY: dict, USER_FRIE
             reason = SAFETY_TAXONOMY.get(code, "Unknown Reason")
             user_message = USER_FRIENDLY_MESSAGES.get(code, USER_FRIENDLY_MESSAGES["default"])
 
-            # print(f"[Guard Layer 1] BLOCKED - Code: {code}, Reason: {reason}")
+            print(f"[Guard Layer 1] BLOCKED - Code: {code}, Reason: {reason}")
             return False, json.dumps({"decision": "not allowed", "message":user_message})
         else:
             return False, json.dumps({"decision": "not allowed", "message":USER_FRIENDLY_MESSAGES["default"]})
@@ -146,7 +146,7 @@ def check_prompt_attack(score: str, threshold: float = 0.9):
     try:
         score_float  = float(score)
         if score_float  > threshold:
-            # print(f"[Guard Layer 2] BLOCKED - Jailbreak/Injection detected, score: {score_float}")
+            print(f"[Guard Layer 2] BLOCKED - Jailbreak/Injection detected, score: {score_float}")
             return False, json.dumps({"decision": "not allowed", "message":PROMPT_ATTACK_MESSAGE})
         else:
             return True, "Guard Layer 2 : Safe....."
