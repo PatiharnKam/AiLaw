@@ -21,6 +21,9 @@ type Client struct {
 	handler *Handler
 	mu      sync.Mutex
 	closed  bool
+
+	cancelMu      sync.Mutex
+	activeCancels map[string]context.CancelFunc // sessionID -> cancel function
 }
 
 func (h *Handler) WebSocketHandler(c *gin.Context) {
@@ -59,11 +62,12 @@ func (h *Handler) WebSocketHandler(c *gin.Context) {
 	}
 
 	client := &Client{
-		conn:    conn,
-		userID:  userID,
-		send:    make(chan []byte, 256),
-		done:    make(chan struct{}),
-		handler: h,
+		conn:          conn,
+		userID:        userID,
+		send:          make(chan []byte, 256),
+		done:          make(chan struct{}),
+		handler:       h,
+		activeCancels: make(map[string]context.CancelFunc),
 	}
 
 	go client.writePump()
@@ -103,6 +107,8 @@ func (c *Client) readPump() {
 		switch wsMsg.Type {
 		case "chat":
 			go c.handleChatMessage(wsMsg)
+		case "cancel":
+			c.handleCancelMessage(wsMsg)
 		case "ping":
 			c.sendResponse(WSResponse{Type: "pong"})
 		default:
@@ -139,12 +145,52 @@ func (c *Client) writePump() {
 	}
 }
 
+func (c *Client) registerCancel(sessionID string, cancel context.CancelFunc) {
+	c.cancelMu.Lock()
+	defer c.cancelMu.Unlock()
+	c.activeCancels[sessionID] = cancel
+}
+
+func (c *Client) removeCancel(sessionID string) {
+	c.cancelMu.Lock()
+	defer c.cancelMu.Unlock()
+	delete(c.activeCancels, sessionID)
+}
+
+func (c *Client) handleCancelMessage(msg WSMessage) {
+	logger := slog.Default()
+
+	if msg.SessionID == "" {
+		c.sendError("invalid_request", "sessionId is required for cancel")
+		return
+	}
+
+	c.cancelMu.Lock()
+	cancel, exists := c.activeCancels[msg.SessionID]
+	c.cancelMu.Unlock()
+
+	if exists {
+		cancel()
+		logger.Info("Chat cancelled by user", "userId", c.userID, "sessionId", msg.SessionID)
+	}
+
+	// Send cancel signal to FastAPI service
+	go c.handler.service.CancelModelRequest(msg.SessionID)
+
+	c.sendResponse(WSResponse{
+		Type:      "cancelled",
+		SessionID: msg.SessionID,
+	})
+}
+
 func (c *Client) handleChatMessage(msg WSMessage) {
 	logger := slog.Default()
-	ctx := context.Background()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer func() {
+		cancel()
+		c.removeCancel(msg.SessionID)
+	}()
 
 	// Monitor done channel
 	go func() {
@@ -159,6 +205,8 @@ func (c *Client) handleChatMessage(msg WSMessage) {
 		c.sendError("invalid_request", "sessionId and content are required")
 		return
 	}
+
+	c.registerCancel(msg.SessionID, cancel)
 
 	// Send acknowledgment
 	c.sendResponse(WSResponse{
@@ -216,6 +264,10 @@ func (c *Client) handleChatMessage(msg WSMessage) {
 
 	resp, err := c.handler.service.ChatbotProcessWithStream(ctx, req, streamCallback)
 	if err != nil {
+		if ctx.Err() == context.Canceled || resp.Code == "cancelled" {
+			logger.Info("Chat process cancelled", "userId", c.userID, "sessionId", msg.SessionID)
+			return
+		}
 		logger.Error("Chat process error", "error", err.Error())
 		c.sendError(resp.Code, resp.Message)
 		return

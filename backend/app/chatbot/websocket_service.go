@@ -60,6 +60,7 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 	}
 
 	var modelErr error
+	var wasCancelled bool
 	responseTime, err := s.callFastAPIStream(ctx, req, modelURL, func(event StreamEvent) {
 		switch event.Type {
 		case "content":
@@ -79,12 +80,19 @@ func (s *MessageService) ChatbotProcessWithStream(ctx context.Context, req Chatb
 			if event.FullContent != "" {
 				modelMessageDetail.Content = event.FullContent
 			}
+		case "cancelled":
+			wasCancelled = true
+			logger.Info("stream cancelled by FastAPI", "sessionId", req.SessionId)
 		case "error":
 			logger.Error("stream error", "error", event.Error)
 			modelErr = fmt.Errorf("model error: %s", event.Error)
 		}
 	})
 	modelMessageDetail.ResponseTime = responseTime
+
+	if wasCancelled || ctx.Err() == context.Canceled {
+		return app.Response{}, fmt.Errorf("cancelled")
+	}
 
 	if err != nil || modelErr != nil {
 		return app.Response{
@@ -140,6 +148,7 @@ func (s *MessageService) callFastAPIStream(
 				Content: req.Input.Messages.Content,
 			},
 		},
+		SessionID: req.SessionId,
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -171,10 +180,17 @@ func (s *MessageService) callFastAPIStream(
 	// Parse SSE stream
 	reader := bufio.NewReader(resp.Body)
 	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
 				break
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
 			}
 			return nil, fmt.Errorf("error reading stream: %w", err)
 		}
@@ -200,7 +216,7 @@ func (s *MessageService) callFastAPIStream(
 
 			onEvent(event)
 
-			if event.Type == "done" || event.Type == "error" {
+			if event.Type == "done" || event.Type == "error" || event.Type == "cancelled" {
 				break
 			}
 		}
@@ -208,4 +224,34 @@ func (s *MessageService) callFastAPIStream(
 
 	responseTime := time.Since(callStart).Seconds()
 	return &responseTime, nil
+}
+
+// CancelModelRequest sends a cancel signal to the FastAPI service
+func (s *MessageService) CancelModelRequest(sessionID string) {
+	logger := slog.Default()
+
+	cancelURL := s.cfg.Model.ModelCancelURL
+
+	body, _ := json.Marshal(map[string]string{
+		"session_id": sessionID,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cancelURL, bytes.NewBuffer(body))
+	if err != nil {
+		logger.Error("Failed to create cancel request", "error", err)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.cfg.Model.ModelAPIkey)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		logger.Error("Failed to send cancel request to model", "error", err)
+		return
+	}
+	defer resp.Body.Close()
 }

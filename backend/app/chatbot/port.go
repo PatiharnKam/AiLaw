@@ -12,6 +12,7 @@ type Service interface {
 	ChatbotProcess(ctx context.Context, req ChatbotProcessRequest) (app.Response, error)
 	// ChatbotProcessWithStream(ctx context.Context, req ChatbotProcessRequest, onChunk StreamCallback) (*StreamingMessageResponse, error)
 	ChatbotProcessWithStream(ctx context.Context, req ChatbotProcessRequest, onChunk StreamCallback) (app.Response, error)
+	CancelModelRequest(sessionID string)
 }
 
 type Storage interface {
@@ -63,7 +64,8 @@ type Messages struct {
 }
 
 type ChatbotRequest struct {
-	Messages []Messages `json:"messages"`
+	Messages  []Messages `json:"messages"`
+	SessionID string     `json:"session_id,omitempty"`
 }
 
 type ChatbotResponse struct {

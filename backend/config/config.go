@@ -53,6 +53,7 @@ type Model struct {
 	ModelCOTURL       string `env:"MODEL_COT_URL"`
 	ModelStreamURL    string `env:"MODEL_STREAM_URL"`
 	ModelCOTStreamURL string `env:"MODEL_COT_STREAM_URL"`
+	ModelCancelURL    string `env:"MODEL_CANCEL_URL"`
 }
 
 type Database struct {

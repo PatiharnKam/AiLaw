@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL
 
 export interface WSMessage {
-  type: "chat" | "ping"
+  type: "chat" | "ping" | "cancel"
   sessionId?: string
   content?: string
   modelType?: string
@@ -17,16 +17,17 @@ export interface WSError {
 }
 
 export interface WSResponse {
-  type: 
-    | "ack" 
-    | "chunk" 
-    | "done" 
-    | "error" 
+  type:
+    | "ack"
+    | "chunk"
+    | "done"
+    | "error"
     | "pong"
     | "guard_passed"
     | "status"
     | "plan"
     | "cot_step"
+    | "cancelled"
   content?: string
   sessionId?: string
   modelMessageId?: string
@@ -48,6 +49,7 @@ interface UseWebSocketOptions {
   onPlan?: (steps: string[], rationale: string) => void
   onCotStep?: (step: number, total: number, description: string) => void
   onStatus?: (status: string) => void
+  onCancelled?: (sessionId: string) => void
 }
 
 export function useWebSocket(
@@ -130,6 +132,9 @@ export function useWebSocket(
               opts.onCotStep?.(data.currentStep, data.totalSteps, data.stepDescription || "")
             }
             break
+          case "cancelled":
+            opts.onCancelled?.(data.sessionId || "")
+            break
         }
       } catch (e) {
         console.error("Failed to parse WebSocket message:", e)
@@ -198,6 +203,13 @@ export function useWebSocket(
     })
   }, [sendMessage])
 
+  const sendCancel = useCallback((sessionId: string): boolean => {
+    return sendMessage({
+      type: "cancel",
+      sessionId,
+    })
+  }, [sendMessage])
+
   useEffect(() => {
     if (accessToken && !wsRef.current) {
       connect()
@@ -227,5 +239,6 @@ export function useWebSocket(
     disconnect,
     sendMessage,
     sendChat,
+    sendCancel,
   }
 }
