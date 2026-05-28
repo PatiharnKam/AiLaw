@@ -11,6 +11,7 @@ RUN npm ci
 COPY . .
 
 # Build Next.js app
+ENV DOCKER_BUILD=true
 RUN npm run build
 
 # Production stage
